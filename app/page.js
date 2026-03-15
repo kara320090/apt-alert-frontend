@@ -1,66 +1,63 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+
+
+"use client";
+
+import EmailForm from "../components/EmailForm";
+import { useState } from "react";
+import { dummyListings } from "../data/dummy";
+import FilterBar from "../components/FilterBar";
+import ListingCard from "../components/ListingCard";
 
 export default function Home() {
+  const [listings, setListings] = useState(dummyListings);
+
+  function handleFilter({ region, grade, maxDiscount }) {
+    const filtered = dummyListings.filter((item) => {
+      const regionMatch = region === "전체" || item.region_name === region;
+      const gradeMatch = grade === "전체" || item.grade === grade;
+      const discountMatch = item.discount_rate >= maxDiscount;
+      return regionMatch && gradeMatch && discountMatch;
+    });
+    setListings(filtered);
+  }
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.js file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="min-h-screen bg-gray-50">
+
+      {/* 헤더 */}
+      <div className="bg-white border-b border-gray-200 px-6 py-5">
+        <h1 className="text-xl font-bold text-gray-900">급매물 알리미</h1>
+        <p className="text-sm text-gray-400 mt-0.5">
+          실거래가 기반 급매물 자동 감지 서비스
+        </p>
+      </div>
+
+      <div className="max-w-4xl mx-auto px-6 py-6">
+
+        {/* 필터 */}
+        <FilterBar onFilter={handleFilter} />
+
+        {/* 결과 수 */}
+        <p className="text-sm text-gray-500 mb-4">
+          {listings.length}건의 급매물
+        </p>
+
+        {/* 매물 목록 */}
+        {listings.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {listings.map((listing) => (
+              <ListingCard key={listing.id} listing={listing} />
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-16 text-gray-400 text-sm">
+            조건에 맞는 급매물이 없습니다
+          </div>
+        )}
+        {/* 알림 구독 */}
+        <EmailForm />
+
+      </div>
+    </main>
   );
 }
