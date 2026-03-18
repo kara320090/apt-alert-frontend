@@ -29,8 +29,11 @@ export default function Home() {
           // A의 API 연동됐을 때 — 실제 데이터
           const res = await fetch(`${API_URL}/listings`);
           if (!res.ok) throw new Error("API 호출 실패");
-          const raw = await res.json();
-          data = enrichListings(raw);
+const raw = await res.json();
+console.log("API 응답 데이터:", raw);
+console.log("첫 번째 항목:", raw[0]);
+data = enrichListings(raw);
+console.log("급매 판별 후:", data);
         } else {
           // A 대기 중 — 더미 데이터
           await new Promise((r) => setTimeout(r, 500)); // 로딩 효과
