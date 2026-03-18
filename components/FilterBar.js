@@ -6,7 +6,7 @@ import { regions, grades } from "../data/dummy";
 export default function FilterBar({ onFilter }) {
   const [region, setRegion] = useState("전체");
   const [grade, setGrade] = useState("전체");
-  const [maxDiscount, setMaxDiscount] = useState(30);
+  const [maxDiscount, setMaxDiscount] = useState(0);
 
   function handleApply() {
     onFilter({ region, grade, maxDiscount });
@@ -53,7 +53,7 @@ export default function FilterBar({ onFilter }) {
           </label>
           <input
             type="range"
-            min={5}
+            min={0}
             max={40}
             step={1}
             value={maxDiscount}
