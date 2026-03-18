@@ -122,10 +122,3 @@ export default function Home() {
     </main>
   );
 }
-```
-
-저장(`Ctrl+S`) 후 브라우저에서 확인해보세요.
-
-노란색 **"더미 데이터 모드"** 배지가 헤더에 보이면 성공이에요. A의 Render URL이 생기면 `.env.local` 에 이 한 줄만 추가하면 자동으로 실제 데이터로 전환돼요.
-```
-NEXT_PUBLIC_API_URL=https://A가_알려준_URL
