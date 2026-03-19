@@ -10,13 +10,5 @@ jobs:
     steps:
       - name: Ping Render Server
         run: curl -s ${{ secrets.RENDER_URL }}/health || true
-```
-
-저장 후 GitHub에 Render URL을 비밀로 등록해야 해요.
-
-**GitHub Secret 등록**
-
-`github.com` → `apt-alert-frontend` 레포 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
-```
 Name: RENDER_URL
 Value: https://project1-atd3.onrender.com
