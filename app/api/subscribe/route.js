@@ -58,7 +58,6 @@ export async function POST(request) {
     const listingsHtml =
       matchedListings.length > 0
         ? matchedListings
-            .slice(0, 10)
             .map(
               (l) => `
           <tr>
