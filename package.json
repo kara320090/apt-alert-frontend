@@ -15,7 +15,10 @@
     "resend": "^6.9.4"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.2",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6"
+    "eslint-config-next": "16.1.6",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2"
   }
 }
