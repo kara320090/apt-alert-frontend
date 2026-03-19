@@ -10,5 +10,3 @@ jobs:
     steps:
       - name: Ping Render Server
         run: curl -s ${{ secrets.RENDER_URL }}/health || true
-Name: RENDER_URL
-Value: https://project1-atd3.onrender.com
