@@ -16,18 +16,33 @@ export default function EmailForm() {
     }
 
     setLoading(true);
+    setStatus(null);
 
-    // 나중에 실제 Resend API로 교체
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const res = await fetch("/api/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, region, minDiscount }),
+      });
 
-    setLoading(false);
-    setStatus("success");
-    setEmail("");
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error);
+
+      setStatus("success");
+      setEmail("");
+    } catch (err) {
+      setStatus("error");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <div className="bg-blue-50 border border-blue-100 rounded-xl p-5 mt-8">
-      <h2 className="text-sm font-semibold text-blue-900 mb-1">급매물 알림 구독</h2>
+      <h2 className="text-sm font-semibold text-blue-900 mb-1">
+        급매물 알림 구독
+      </h2>
       <p className="text-xs text-blue-500 mb-4">
         조건에 맞는 급매물이 나오면 이메일로 즉시 알려드려요
       </p>
@@ -87,7 +102,7 @@ export default function EmailForm() {
       {/* 상태 메시지 */}
       {status === "success" && (
         <p className="text-xs text-green-600 text-center mt-3">
-          구독 완료! 급매물이 나오면 바로 알려드릴게요.
+          구독 완료! 이메일을 확인해보세요.
         </p>
       )}
       {status === "error" && (
