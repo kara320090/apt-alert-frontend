@@ -3,19 +3,39 @@
 import { useState, useEffect } from "react";
 import { dummyListings } from "../data/dummy";
 import { enrichListings, applyFilter } from "../lib/filter";
+import { fetchFilter } from "../lib/api";
 import FilterBar from "../components/FilterBar";
 import ListingCard from "../components/ListingCard";
 import EmailForm from "../components/EmailForm";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
+function mapItem(item) {
+  return {
+    id: item.id,
+    apt_seq: item.properties.apt_seq,
+    apt_name: item.properties.apt_name,
+    area_size: item.properties.area_size,
+    region_code: item.properties.region_code,
+    region_name: item.properties.dong,
+    price: item.price,
+    floor: item.floor,
+    deal_year: parseInt(item.deal_date?.split("-")[0]),
+    deal_month: parseInt(item.deal_date?.split("-")[1]),
+    cdeal_type: item.is_cancelled ? "Y" : "",
+    market_avg: item.market_avg,
+    discount_rate: item.discount_rate,
+    grade: item.grade,
+  };
+}
+
 export default function Home() {
-  const [allListings, setAllListings] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
+  const [filterParams, setFilterParams] = useState({ region: "전체", grade: "전체", maxDiscount: 5 });
 
   useEffect(() => {
     async function loadData() {
@@ -24,28 +44,20 @@ export default function Home() {
       try {
         let data;
         if (API_URL) {
-          const res = await fetch(`${API_URL}/listings`);
-          if (!res.ok) throw new Error("API 호출 실패");
-          const json = await res.json();
-          const raw = json.data.map((item) => ({
-            id: item.id,
-            apt_seq: item.properties.apt_seq,
-            apt_name: item.properties.apt_name,
-            area_size: item.properties.area_size,
-            region_code: item.properties.region_code,
-            region_name: item.properties.dong,
-            price: item.price,
-            floor: item.floor,
-            deal_year: parseInt(item.deal_date.split("-")[0]),
-            deal_month: parseInt(item.deal_date.split("-")[1]),
-            cdeal_type: item.is_cancelled ? "Y" : "",
-          }));
-          data = enrichListings(raw);
+          const json = await fetchFilter({
+            region: filterParams.region,
+            grade: filterParams.grade,
+            minDiscount: filterParams.maxDiscount,
+          });
+          data = json.data.map(mapItem);
         } else {
           await new Promise((r) => setTimeout(r, 500));
-          data = enrichListings(dummyListings);
+          data = applyFilter(enrichListings(dummyListings), {
+            region: filterParams.region,
+            grade: filterParams.grade,
+            minDiscount: filterParams.maxDiscount,
+          });
         }
-        setAllListings(data);
         setFiltered(data);
       } catch (err) {
         setError("데이터를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
@@ -54,15 +66,10 @@ export default function Home() {
       }
     }
     loadData();
-  }, []);
+  }, [filterParams]);
 
-  function handleFilter({ region, grade, maxDiscount }) {
-    const result = applyFilter(allListings, {
-      region,
-      grade,
-      minDiscount: maxDiscount,
-    });
-    setFiltered(result);
+  function handleFilter(params) {
+    setFilterParams(params);
     setPage(1);
   }
 
