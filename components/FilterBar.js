@@ -1,24 +1,79 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { regions, grades } from "../data/dummy";
 
 export default function FilterBar({ onFilter }) {
   const [region, setRegion] = useState("전체");
   const [grade, setGrade] = useState("전체");
   const [maxDiscount, setMaxDiscount] = useState(5);
+  const [aiEnabled, setAiEnabled] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("apt-alert-ai-enabled");
+    if (saved === "true") {
+      setAiEnabled(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("apt-alert-ai-enabled", String(aiEnabled));
+  }, [aiEnabled]);
 
   function handleApply() {
-    onFilter({ region, grade, maxDiscount });
+    onFilter({
+      region,
+      grade,
+      maxDiscount,
+      aiEnabled,
+    });
   }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
-      <h2 className="text-base font-semibold text-gray-800 mb-4">급매물 검색 조건</h2>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-800">급매물 검색 조건</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            AI 해석은 선택적으로 켜고 끌 수 있습니다.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setAiEnabled((prev) => !prev)}
+          className={`relative inline-flex h-7 w-14 items-center rounded-full transition ${
+            aiEnabled ? "bg-blue-600" : "bg-gray-300"
+          }`}
+          aria-pressed={aiEnabled}
+        >
+          <span
+            className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+              aiEnabled ? "translate-x-8" : "translate-x-1"
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="mb-5 flex items-center gap-2">
+        <span
+          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+            aiEnabled
+              ? "bg-blue-50 text-blue-700 border border-blue-200"
+              : "bg-gray-100 text-gray-500 border border-gray-200"
+          }`}
+        >
+          AI 해석 {aiEnabled ? "ON" : "OFF"}
+        </span>
+
+        <span className="text-xs text-gray-400">
+          {aiEnabled
+            ? "가격 + 역세권/학교/병원/생활편의 태그를 표시합니다"
+            : "기본 필터만 사용합니다"}
+        </span>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
-
-        {/* 지역 */}
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">지역</label>
           <select
@@ -27,12 +82,13 @@ export default function FilterBar({ onFilter }) {
             onChange={(e) => setRegion(e.target.value)}
           >
             {regions.map((r) => (
-              <option key={r} value={r}>{r}</option>
+              <option key={r} value={r}>
+                {r}
+              </option>
             ))}
           </select>
         </div>
 
-        {/* 급매 등급 */}
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">급매 등급</label>
           <select
@@ -41,12 +97,13 @@ export default function FilterBar({ onFilter }) {
             onChange={(e) => setGrade(e.target.value)}
           >
             {grades.map((g) => (
-              <option key={g} value={g}>{g}</option>
+              <option key={g} value={g}>
+                {g}
+              </option>
             ))}
           </select>
         </div>
 
-        {/* 할인율 */}
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">
             최소 할인율
@@ -67,7 +124,6 @@ export default function FilterBar({ onFilter }) {
             <span>40%</span>
           </div>
         </div>
-
       </div>
 
       <button
