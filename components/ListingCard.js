@@ -75,9 +75,16 @@ export default function ListingCard({ listing }) {
             <p className="text-xs text-gray-300">
               {listing.deal_year}년 {listing.deal_month}월 거래
             </p>
-            <button className="text-xs text-blue-500 hover:text-blue-700 font-medium transition">
-              지도에서 보기 →
-            </button>
+            <button
+  onClick={(e) => { 
+    e.stopPropagation(); 
+    console.log("지도 버튼 클릭됨");
+    setShowMap(true); 
+  }}
+  className="text-xs text-blue-500 hover:text-blue-700 font-medium transition"
+>
+  지도에서 보기 →
+</button>
           </div>
         </div>
       )}
