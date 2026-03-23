@@ -6,14 +6,6 @@ export const runtime = "nodejs";
 
 const REST_API_KEY = process.env.KAKAO_REST_API_KEY;
 const locationCache = new Map();
-const CACHE_MAX_SIZE = 500;
-
-function cacheSet(key, value) {
-  if (locationCache.size >= CACHE_MAX_SIZE) {
-    locationCache.delete(locationCache.keys().next().value);
-  }
-  locationCache.set(key, value);
-}
 
 function uniqueTags(tags) {
   return [...new Set((tags || []).filter(Boolean))];
@@ -90,7 +82,7 @@ async function findApartmentBase(listing) {
       road_address_name: matched.road_address_name || "",
     };
 
-    cacheSet(cacheKey, base);
+    locationCache.set(cacheKey, base);
     return base;
   }
 
@@ -225,7 +217,7 @@ async function buildLocationMetaForListing(listing) {
       ai_summary: "",
       ai_location_meta: null,
     };
-    cacheSet(cacheKey, empty);
+    locationCache.set(cacheKey, empty);
     return empty;
   }
 
