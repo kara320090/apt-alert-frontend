@@ -9,6 +9,8 @@ import FilterBar from "../components/FilterBar";
 import ListingCard from "../components/ListingCard";
 import EmailForm from "../components/EmailForm";
 import KakaoMap from "../components/KakaoMap";
+import TopTabs from "../components/TopTabs";
+import RegionReport from "../components/RegionReport";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -35,6 +37,7 @@ export default function Home() {
   const [visibleCount, setVisibleCount] = useState(15);
   const [selectedId, setSelectedId] = useState(null);
   const [regions, setRegions] = useState(REGION_FALLBACK);
+  const [activeTab, setActiveTab] = useState("list");
 
   const [filterParams, setFilterParams] = useState({
     region: "전체",
@@ -101,49 +104,58 @@ export default function Home() {
         </header>
 
         {/* Scrollable Feed */}
-        <div className="flex-1 overflow-y-auto px-6 md:px-10 py-8 bg-slate-100 scroll-smooth shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]">
-          <FilterBar onFilter={setFilterParams} regions={regions} />
+        <div className="flex-1 overflow-y-auto w-full bg-slate-50 scroll-smooth shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]">
+          {/* BULLETPROOF INNER WRAPPER */}
+          <div className="max-w-2xl mx-auto w-full px-6 py-8">
 
-          <div className="flex items-center justify-between mb-4 mt-2">
-            <p className="text-sm font-bold text-gray-800">
-              발견된 급매물 <span className="text-red-600">{filtered.length}</span>건
-            </p>
-          </div>
+            <TopTabs activeTab={activeTab} onChange={setActiveTab} />
 
-          <div className="flex flex-col gap-4">
-            {loading && (
-              <div className="py-10 text-center text-sm font-bold text-gray-400 animate-pulse">레이더 가동 중...</div>
-            )}
-            {error && (
-              <div className="py-10 text-center text-sm font-bold text-red-400">{error}</div>
-            )}
-            {!loading && !error && (
+            {activeTab === "list" ? (
               <>
-                {displayListings.map((listing, index) => (
-                  <div
-                    key={listing.id}
-                    onClick={() => setSelectedId(listing.id)}
-                    className="w-full"
-                  >
-                    <ListingCard listing={listing} isSelected={selectedId === listing.id} />
-                    {index === 2 && (
-                      <div className="my-6">
-                        <EmailForm filterParams={filterParams} />
-                      </div>
-                    )}
-                  </div>
-                ))}
+                <FilterBar onFilter={setFilterParams} regions={regions} />
 
-                {visibleCount < filtered.length && (
-                  <button
-                    onClick={() => setVisibleCount(v => v + 15)}
-                    className="w-full py-4 mt-4 bg-white border border-slate-200 text-gray-900 font-bold rounded-xl hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm transition-all"
-                  >
-                    급매물 더 보기 ↓
-                  </button>
-                )}
+                <div className="flex items-center justify-between mb-4 mt-2">
+                  <p className="text-sm font-bold text-gray-800">
+                    발견된 급매물 <span className="text-red-600">{filtered.length}</span>건
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  {loading && (
+                    <div className="py-10 text-center text-sm font-bold text-gray-400 animate-pulse">레이더 가동 중...</div>
+                  )}
+                  {error && (
+                    <div className="py-10 text-center text-sm font-bold text-red-400">{error}</div>
+                  )}
+                  {!loading && !error && (
+                    <>
+                      {displayListings.map((listing, index) => (
+                        <div
+                          key={listing.id}
+                          onClick={() => setSelectedId(listing.id)}
+                          className="w-full"
+                        >
+                          <ListingCard listing={listing} isSelected={selectedId === listing.id} />
+                          {index === 2 && <EmailForm filterParams={filterParams} />}
+                        </div>
+                      ))}
+
+                      {visibleCount < filtered.length && (
+                        <button
+                          onClick={() => setVisibleCount(v => v + 15)}
+                          className="w-full py-4 mt-4 mb-8 bg-white border border-slate-200 text-gray-900 font-bold rounded-xl hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm transition-all"
+                        >
+                          급매물 더 보기 ↓
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
               </>
+            ) : (
+              <RegionReport listings={filtered} />
             )}
+
           </div>
         </div>
       </div>
