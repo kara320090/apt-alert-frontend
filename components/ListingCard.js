@@ -1,6 +1,6 @@
 "use client";
 
-export default function ListingCard({ listing }) {
+export default function ListingCard({ listing, isSelected }) {
   const isSuper = listing.grade === "초급매";
 
   function formatPrice(price) {
@@ -17,7 +17,11 @@ export default function ListingCard({ listing }) {
     : ["강한 가격 메리트", "시세 대비 큰 할인", "역세권", "생활편의 양호"];
 
   return (
-    <div className="relative bg-white rounded-2xl border border-slate-200/80 p-6 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] hover:shadow-[0_12px_32px_-4px_rgba(0,0,0,0.1)] hover:-translate-y-1 hover:border-slate-300 transition-all duration-400 group mb-4">
+    <div className={`relative bg-white rounded-2xl border p-6 transition-all duration-300 group mb-4 cursor-pointer ${
+      isSelected
+        ? "border-red-500 shadow-[0_8px_30px_-4px_rgba(220,38,38,0.15)] ring-2 ring-red-500/10"
+        : "border-slate-200/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] hover:-translate-y-1 hover:border-slate-300"
+    }`}>
       
       {/* 1. Header: Asset & Urgency */}
       <div className="flex justify-between items-start mb-4">

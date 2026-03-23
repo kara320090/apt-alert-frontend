@@ -30,7 +30,7 @@ export default function Home() {
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(15);
-  const [hoveredId, setHoveredId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
 
   const [filterParams, setFilterParams] = useState({
     region: "전체",
@@ -100,13 +100,13 @@ export default function Home() {
               <div className="py-10 text-center text-sm font-bold text-gray-400 animate-pulse">레이더 가동 중...</div>
             ) : (
               displayListings.map((listing, index) => (
-                <div 
+                <div
                   key={listing.id}
-                  onMouseEnter={() => setHoveredId(listing.id)}
-                  onMouseLeave={() => setHoveredId(null)}
+                  onClick={() => setSelectedId(listing.id)}
+                  className="w-full"
                 >
-                  <ListingCard listing={listing} />
-                  
+                  <ListingCard listing={listing} isSelected={selectedId === listing.id} />
+
                   {index === 2 && (
                     <div className="my-6">
                       <EmailForm />
@@ -130,7 +130,7 @@ export default function Home() {
 
       {/* RIGHT COLUMN: The Persistent Map */}
       <div className="hidden md:block flex-1 h-full bg-gray-100 relative">
-         <KakaoMap listings={displayListings} hoveredId={hoveredId} />
+         <KakaoMap listings={displayListings} selectedId={selectedId} />
       </div>
 
     </main>
