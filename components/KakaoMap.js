@@ -43,7 +43,7 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
       initKakao();
     } else {
       const script = document.createElement("script");
-      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false&libraries=services`;
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false&libraries=services,roadview`;
       script.onload = initKakao;
       document.head.appendChild(script);
     }
@@ -94,26 +94,25 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     });
   }, [listings, mapStatus]);
 
-  // Handle Hover -> Map Pan & Roadview Sync
+  // Handle Click -> Map Pan & Roadview Sync
   useEffect(() => {
     const map = mapInstanceRef.current;
-    const rv = roadviewInstanceRef.current;
-    const rvClient = roadviewClientRef.current;
-
-    if (!map || !rv || !rvClient) return;
+    if (!map) return;
 
     Object.values(markersRef.current).forEach(m => m.overlay.setZIndex(1));
 
     if (selectedId && markersRef.current[selectedId]) {
       const target = markersRef.current[selectedId];
       target.overlay.setZIndex(50);
-      
-      // Pan Map
+
+      // Always pan the map
       map.panTo(target.coords);
 
-      // Sync Roadview if active
-      if (activeView === "roadview") {
-        rvClient.getNearestPanoId(target.coords, 50, (panoId) => {
+      // Sync Roadview if active and available
+      const rv = roadviewInstanceRef.current;
+      const rvClient = roadviewClientRef.current;
+      if (activeView === "roadview" && rv && rvClient) {
+        rvClient.getNearestPanoId(target.coords, 500, (panoId) => {
           if (panoId) rv.setPanoId(panoId, target.coords);
         });
       }
