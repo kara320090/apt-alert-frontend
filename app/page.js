@@ -173,7 +173,14 @@ export default function Home() {
 
                 <div className="flex items-center justify-between mb-4 mt-2">
                   <p className="text-sm font-bold text-gray-800">
-                    발견된 급매물 <span className="text-red-600">{filtered.length}</span>건
+                    {!loading && filtered.length > 0 ? (
+                      <>
+                        <span className="text-red-600">{(currentPage - 1) * PER_PAGE + 1}</span>
+                        {" ~ "}
+                        <span className="text-red-600">{(currentPage - 1) * PER_PAGE + filtered.length}</span>
+                        {"번째 급매물"}
+                      </>
+                    ) : "급매물 탐색 중"}
                   </p>
                   {!loading && totalPages > 1 && (
                     <p className="text-xs text-gray-400 font-bold">{currentPage} / {totalPages}{hasMore ? "+" : ""} 페이지</p>
