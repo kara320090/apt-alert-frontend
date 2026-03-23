@@ -73,7 +73,12 @@ function loadKakaoMapSdk() {
   });
 }
 
-export default function KakaoMap({ listing, onClose }) {
+export default function KakaoMap({
+  listing,
+  onClose,
+  embedded = false,
+  contentHeightClass = "h-[520px]",
+}) {
   const mapRef = useRef(null);
   const roadviewRef = useRef(null);
 
@@ -353,9 +358,17 @@ export default function KakaoMap({ listing, onClose }) {
     }
   };
 
+  const wrapperClass = embedded
+    ? "bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm"
+    : "bg-white rounded-2xl overflow-hidden w-full max-w-5xl mx-4 shadow-xl";
+
+  const rootClass = embedded
+    ? "w-full"
+    : "fixed inset-0 bg-black/50 flex items-center justify-center z-50";
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl overflow-hidden w-full max-w-5xl mx-4 shadow-xl">
+    <div className={rootClass}>
+      <div className={wrapperClass}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <p className="font-semibold text-gray-900">{listing.apt_name}</p>
@@ -363,12 +376,15 @@ export default function KakaoMap({ listing, onClose }) {
               {listing.region_name} · {listing.area_size}㎡ · {listing.floor}층
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl font-light"
-          >
-            ✕
-          </button>
+
+          {!embedded && (
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 text-xl font-light"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         <div className="px-5 pt-4 flex flex-col gap-3">
@@ -424,13 +440,13 @@ export default function KakaoMap({ listing, onClose }) {
         <div className="p-5">
           <div
             ref={mapRef}
-            className={`${activeTab === "map" ? "block" : "hidden"} w-full h-[520px] rounded-xl border border-gray-200 bg-gray-50`}
+            className={`${activeTab === "map" ? "block" : "hidden"} w-full ${contentHeightClass} rounded-xl border border-gray-200 bg-gray-50`}
           />
 
           <div className={`${activeTab === "roadview" ? "block" : "hidden"} w-full`}>
             <div
               ref={roadviewRef}
-              className={`w-full h-[520px] rounded-xl border border-gray-200 ${
+              className={`w-full ${contentHeightClass} rounded-xl border border-gray-200 ${
                 roadviewStatus === "ready" ? "bg-gray-50" : "bg-gray-100"
               }`}
             />
