@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { regions } from "../data/dummy";
 import { buildRegionAiSummary, buildRegionReport } from "../lib/report";
 
-export default function RegionReport({ listings, aiEnabled }) {
+export default function RegionReport({ listings, aiEnabled, regions }) {
   const [selectedRegion, setSelectedRegion] = useState("전체");
 
   const report = useMemo(() => {
@@ -24,9 +23,9 @@ export default function RegionReport({ listings, aiEnabled }) {
           onChange={(e) => setSelectedRegion(e.target.value)}
           className="w-full md:w-72 border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50"
         >
-          {regions.map((r) => (
-            <option key={r} value={r}>
-              {r}
+          {regions.map((region) => (
+            <option key={region} value={region}>
+              {region}
             </option>
           ))}
         </select>

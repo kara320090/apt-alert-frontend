@@ -3,7 +3,13 @@
 import { useState } from "react";
 import KakaoMap from "./KakaoMap";
 
-export default function ListingCard({ listing, aiEnabled = false }) {
+export default function ListingCard({
+  listing,
+  aiEnabled = false,
+  mapMode = "modal",
+  onOpenMap,
+  isSelected = false,
+}) {
   const [open, setOpen] = useState(false);
   const [showMap, setShowMap] = useState(false);
 
@@ -27,23 +33,32 @@ export default function ListingCard({ listing, aiEnabled = false }) {
 
   return (
     <>
-      <div className={`bg-white rounded-2xl border ${style.border} shadow-sm mb-3 overflow-hidden transition-all`}>
+      <div
+        className={`bg-white rounded-2xl border ${style.border} shadow-sm mb-3 overflow-hidden transition-all ${
+          isSelected ? "ring-2 ring-blue-200" : ""
+        }`}
+      >
         <div
           className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50 transition"
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            setOpen(!open);
+            if (mapMode === "panel" && onOpenMap) {
+              onOpenMap(listing);
+            }
+          }}
         >
           <div className="flex items-center gap-3">
             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${style.bg} ${style.text}`}>
               {listing.grade}
             </span>
-            <span className="text-sm font-semibold text-gray-900">{listing.apt_name || "이름 없음"}</span>
+            <span className="text-sm font-semibold text-gray-900">{listing.apt_name}</span>
             <span className="text-xs text-gray-400 hidden md:inline">
-              {listing.region_name || ""} · {listing.area_size}㎡
+              {listing.region_name} · {listing.area_size}㎡
             </span>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className={`text-sm font-bold ${style.text}`}>−{listing.discount_rate ?? "?"}%</span>
+            <span className={`text-sm font-bold ${style.text}`}>−{listing.discount_rate}%</span>
             <span className="text-sm font-semibold text-gray-800">{formatPrice(listing.price)}</span>
             <span className="text-gray-300 text-sm">{open ? "▲" : "▼"}</span>
           </div>
@@ -101,18 +116,24 @@ export default function ListingCard({ listing, aiEnabled = false }) {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setShowMap(true);
+                  if (onOpenMap) {
+                    onOpenMap(listing);
+                  }
+
+                  if (mapMode === "modal") {
+                    setShowMap(true);
+                  }
                 }}
                 className="text-xs text-blue-500 hover:text-blue-700 font-medium transition"
               >
-                지도에서 보기 →
+                {mapMode === "panel" ? "우측 지도에서 보기 →" : "지도에서 보기 →"}
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {showMap && (
+      {mapMode === "modal" && showMap && (
         <KakaoMap
           listing={listing}
           onClose={() => setShowMap(false)}

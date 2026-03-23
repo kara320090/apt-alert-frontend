@@ -1,31 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { regions, grades } from "../data/dummy";
+import { GRADES } from "@/lib/constants/grades";
 
-export default function FilterBar({ onFilter }) {
-  const [region, setRegion] = useState("전체");
-  const [grade, setGrade] = useState("전체");
-  const [maxDiscount, setMaxDiscount] = useState(5);
-  const [aiEnabled, setAiEnabled] = useState(false);
+export default function FilterBar({ value, regions, onSubmit }) {
+  const [draft, setDraft] = useState(value);
 
   useEffect(() => {
-    const saved = localStorage.getItem("apt-alert-ai-enabled");
-    if (saved === "true") {
-      setAiEnabled(true);
-    }
-  }, []);
+    setDraft(value);
+  }, [value]);
 
-  useEffect(() => {
-    localStorage.setItem("apt-alert-ai-enabled", String(aiEnabled));
-  }, [aiEnabled]);
+  function updateField(key, nextValue) {
+    setDraft((prev) => ({
+      ...prev,
+      [key]: nextValue,
+    }));
+  }
 
   function handleApply() {
-    onFilter({
-      region,
-      grade,
-      maxDiscount,
-      aiEnabled,
+    onSubmit({
+      ...draft,
+      page: 1,
     });
   }
 
@@ -41,15 +36,15 @@ export default function FilterBar({ onFilter }) {
 
         <button
           type="button"
-          onClick={() => setAiEnabled((prev) => !prev)}
+          onClick={() => updateField("aiEnabled", !draft.aiEnabled)}
           className={`relative inline-flex h-7 w-14 items-center rounded-full transition ${
-            aiEnabled ? "bg-blue-600" : "bg-gray-300"
+            draft.aiEnabled ? "bg-blue-600" : "bg-gray-300"
           }`}
-          aria-pressed={aiEnabled}
+          aria-pressed={draft.aiEnabled}
         >
           <span
             className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
-              aiEnabled ? "translate-x-8" : "translate-x-1"
+              draft.aiEnabled ? "translate-x-8" : "translate-x-1"
             }`}
           />
         </button>
@@ -58,16 +53,16 @@ export default function FilterBar({ onFilter }) {
       <div className="mb-5 flex items-center gap-2">
         <span
           className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-            aiEnabled
+            draft.aiEnabled
               ? "bg-blue-50 text-blue-700 border border-blue-200"
               : "bg-gray-100 text-gray-500 border border-gray-200"
           }`}
         >
-          AI 해석 {aiEnabled ? "ON" : "OFF"}
+          AI 해석 {draft.aiEnabled ? "ON" : "OFF"}
         </span>
 
         <span className="text-xs text-gray-400">
-          {aiEnabled
+          {draft.aiEnabled
             ? "가격 + 역세권/학교/병원/생활편의 태그를 표시합니다"
             : "기본 필터만 사용합니다"}
         </span>
@@ -78,12 +73,12 @@ export default function FilterBar({ onFilter }) {
           <label className="block text-xs font-medium text-gray-500 mb-1.5">지역</label>
           <select
             className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            value={region}
-            onChange={(e) => setRegion(e.target.value)}
+            value={draft.region}
+            onChange={(e) => updateField("region", e.target.value)}
           >
-            {regions.map((r) => (
-              <option key={r} value={r}>
-                {r}
+            {regions.map((region) => (
+              <option key={region} value={region}>
+                {region}
               </option>
             ))}
           </select>
@@ -93,12 +88,12 @@ export default function FilterBar({ onFilter }) {
           <label className="block text-xs font-medium text-gray-500 mb-1.5">급매 등급</label>
           <select
             className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            value={grade}
-            onChange={(e) => setGrade(e.target.value)}
+            value={draft.grade}
+            onChange={(e) => updateField("grade", e.target.value)}
           >
-            {grades.map((g) => (
-              <option key={g} value={g}>
-                {g}
+            {GRADES.map((grade) => (
+              <option key={grade} value={grade}>
+                {grade}
               </option>
             ))}
           </select>
@@ -107,15 +102,15 @@ export default function FilterBar({ onFilter }) {
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">
             최소 할인율
-            <span className="ml-2 text-blue-600 font-semibold">{maxDiscount}% 이상</span>
+            <span className="ml-2 text-blue-600 font-semibold">{draft.minDiscount}% 이상</span>
           </label>
           <input
             type="range"
             min={0}
             max={40}
             step={1}
-            value={maxDiscount}
-            onChange={(e) => setMaxDiscount(Number(e.target.value))}
+            value={draft.minDiscount}
+            onChange={(e) => updateField("minDiscount", Number(e.target.value))}
             className="w-full accent-blue-500"
           />
           <div className="flex justify-between text-xs text-gray-300 mt-1">
