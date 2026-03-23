@@ -196,14 +196,15 @@ export default function Home() {
                   )}
                   {!loading && !error && (
                     <>
-                      {filtered.map((listing, index) => (
+                      <EmailForm filterParams={filterParams} />
+
+                      {filtered.map((listing) => (
                         <div
                           key={listing.id}
                           onClick={() => setSelectedId(listing.id)}
                           className="w-full"
                         >
                           <ListingCard listing={listing} isSelected={selectedId === listing.id} />
-                          {index === 2 && <EmailForm filterParams={filterParams} />}
                         </div>
                       ))}
 
