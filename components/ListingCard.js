@@ -36,9 +36,9 @@ export default function ListingCard({ listing, aiEnabled = false }) {
             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${style.bg} ${style.text}`}>
               {listing.grade}
             </span>
-            <span className="text-sm font-semibold text-gray-900">{listing.apt_name}</span>
+            <span className="text-sm font-semibold text-gray-900">{listing.apt_name || "이름 없음"}</span>
             <span className="text-xs text-gray-400 hidden md:inline">
-              {listing.region_name} · {listing.area_size}㎡
+              {listing.region_name || ""} · {listing.area_size}㎡
             </span>
           </div>
 
