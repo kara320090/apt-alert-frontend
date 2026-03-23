@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dummyListings } from "../data/dummy";
 import { enrichListings, applyFilter } from "../lib/filter";
 import { fetchFilter, fetchRegions } from "../lib/api";
@@ -13,6 +13,7 @@ import TopTabs from "../components/TopTabs";
 import RegionReport from "../components/RegionReport";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const PER_PAGE = 20;
 
 function mapItem(item) {
   return {
@@ -33,11 +34,15 @@ function mapItem(item) {
 export default function Home() {
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState(null);
-  const [visibleCount, setVisibleCount] = useState(15);
   const [selectedId, setSelectedId] = useState(null);
   const [regions, setRegions] = useState(REGION_FALLBACK);
   const [activeTab, setActiveTab] = useState("list");
+
+  const pageRef = useRef(1);
+  const sentinelRef = useRef(null);
 
   const [filterParams, setFilterParams] = useState({
     region: "전체",
@@ -55,22 +60,28 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
+  // Reset and load page 1 when filters change
   useEffect(() => {
-    async function loadData() {
+    async function loadFirstPage() {
       setLoading(true);
       setError(null);
+      setFiltered([]);
+      setHasMore(true);
+      pageRef.current = 1;
+
       try {
         let data;
         if (API_URL) {
-          const json = await fetchFilter(filterParams);
+          const json = await fetchFilter({ ...filterParams, page: 1, perPage: PER_PAGE });
           data = (json.data || []).map(mapItem);
+          setHasMore(data.length === PER_PAGE);
         } else {
           await new Promise((r) => setTimeout(r, 300));
-          data = applyFilter(enrichListings(dummyListings), filterParams);
-          data = data.map(mapItem);
+          data = applyFilter(enrichListings(dummyListings), filterParams).map(mapItem);
+          setHasMore(false);
         }
-        const sorted = data.sort((a, b) => b.discount_rate - a.discount_rate);
-        setFiltered(sorted);
+        data.sort((a, b) => b.discount_rate - a.discount_rate);
+        setFiltered(data);
       } catch (err) {
         console.error(err);
         setError("데이터를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
@@ -78,12 +89,43 @@ export default function Home() {
         setLoading(false);
       }
     }
-    loadData();
+    loadFirstPage();
   }, [filterParams]);
 
-  const displayListings = useMemo(() => {
-    return filtered.slice(0, visibleCount);
-  }, [filtered, visibleCount]);
+  // Infinite scroll — fetch next page when sentinel is visible
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      async (entries) => {
+        if (!entries[0].isIntersecting || loadingMore || !hasMore || !API_URL) return;
+
+        setLoadingMore(true);
+        const nextPage = pageRef.current + 1;
+        try {
+          const json = await fetchFilter({ ...filterParams, page: nextPage, perPage: PER_PAGE });
+          const newData = (json.data || []).map(mapItem);
+          if (newData.length === 0) {
+            setHasMore(false);
+          } else {
+            newData.sort((a, b) => b.discount_rate - a.discount_rate);
+            setFiltered((prev) => [...prev, ...newData]);
+            pageRef.current = nextPage;
+            setHasMore(newData.length === PER_PAGE);
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoadingMore(false);
+        }
+      },
+      { rootMargin: "300px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [filterParams, loadingMore, hasMore]);
 
   return (
     <main className="h-screen w-full flex overflow-hidden bg-white text-gray-900">
@@ -105,7 +147,6 @@ export default function Home() {
 
         {/* Scrollable Feed */}
         <div className="flex-1 overflow-y-auto w-full bg-slate-50 scroll-smooth shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]">
-          {/* BULLETPROOF INNER WRAPPER */}
           <div className="max-w-2xl mx-auto w-full px-6 py-8">
 
             <TopTabs activeTab={activeTab} onChange={setActiveTab} />
@@ -129,7 +170,7 @@ export default function Home() {
                   )}
                   {!loading && !error && (
                     <>
-                      {displayListings.map((listing, index) => (
+                      {filtered.map((listing, index) => (
                         <div
                           key={listing.id}
                           onClick={() => setSelectedId(listing.id)}
@@ -140,13 +181,14 @@ export default function Home() {
                         </div>
                       ))}
 
-                      {visibleCount < filtered.length && (
-                        <button
-                          onClick={() => setVisibleCount(v => v + 15)}
-                          className="w-full py-4 mt-4 mb-8 bg-white border border-slate-200 text-gray-900 font-bold rounded-xl hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm transition-all"
-                        >
-                          급매물 더 보기 ↓
-                        </button>
+                      {/* Infinite scroll sentinel */}
+                      <div ref={sentinelRef} className="h-4" />
+
+                      {loadingMore && (
+                        <div className="py-4 text-center text-sm font-bold text-gray-400 animate-pulse">불러오는 중...</div>
+                      )}
+                      {!hasMore && filtered.length > 0 && (
+                        <p className="text-center text-xs text-gray-300 py-4">모든 급매물을 불러왔습니다</p>
                       )}
                     </>
                   )}
@@ -162,7 +204,7 @@ export default function Home() {
 
       {/* RIGHT COLUMN: The Persistent Map */}
       <div className="hidden md:block flex-1 h-full bg-gray-100 relative">
-        <KakaoMap listings={displayListings} selectedId={selectedId} />
+        <KakaoMap listings={filtered} selectedId={selectedId} />
       </div>
 
     </main>
