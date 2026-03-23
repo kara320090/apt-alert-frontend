@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { dummyListings } from "../data/dummy";
 import { enrichListings, applyFilter } from "../lib/filter";
 import { fetchFilter, fetchRegions } from "../lib/api";
@@ -31,18 +31,57 @@ function mapItem(item) {
   };
 }
 
+function Pagination({ currentPage, totalPages, hasMore, onChange }) {
+  const pages = [];
+  for (let i = 1; i <= totalPages; i++) pages.push(i);
+
+  if (totalPages <= 1 && !hasMore) return null;
+
+  return (
+    <div className="flex items-center justify-center gap-1 py-6">
+      <button
+        onClick={() => onChange(currentPage - 1)}
+        disabled={currentPage === 1}
+        className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold text-gray-400 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      >
+        ←
+      </button>
+
+      {pages.map((p) => (
+        <button
+          key={p}
+          onClick={() => onChange(p)}
+          className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold transition-all ${
+            p === currentPage
+              ? "bg-red-600 text-white shadow-sm"
+              : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+          }`}
+        >
+          {p}
+        </button>
+      ))}
+
+      <button
+        onClick={() => onChange(currentPage + 1)}
+        disabled={!hasMore}
+        className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold text-gray-400 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      >
+        →
+      </button>
+    </div>
+  );
+}
+
 export default function Home() {
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [regions, setRegions] = useState(REGION_FALLBACK);
   const [activeTab, setActiveTab] = useState("list");
-
-  const pageRef = useRef(1);
-  const sentinelRef = useRef(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
 
   const [filterParams, setFilterParams] = useState({
     region: "전체",
@@ -60,25 +99,31 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  // Reset and load page 1 when filters change
+  // Reset to page 1 when filters change
   useEffect(() => {
-    async function loadFirstPage() {
+    setCurrentPage(1);
+    setTotalPages(1);
+  }, [filterParams]);
+
+  // Fetch current page
+  useEffect(() => {
+    async function loadPage() {
       setLoading(true);
       setError(null);
       setFiltered([]);
-      setHasMore(true);
-      pageRef.current = 1;
-
       try {
         let data;
         if (API_URL) {
-          const json = await fetchFilter({ ...filterParams, page: 1, perPage: PER_PAGE });
+          const json = await fetchFilter({ ...filterParams, page: currentPage, perPage: PER_PAGE });
           data = (json.data || []).map(mapItem);
-          setHasMore(data.length === PER_PAGE);
+          const more = data.length === PER_PAGE;
+          setHasMore(more);
+          setTotalPages((prev) => more ? Math.max(prev, currentPage + 1) : currentPage);
         } else {
           await new Promise((r) => setTimeout(r, 300));
           data = applyFilter(enrichListings(dummyListings), filterParams).map(mapItem);
           setHasMore(false);
+          setTotalPages(1);
         }
         data.sort((a, b) => b.discount_rate - a.discount_rate);
         setFiltered(data);
@@ -89,43 +134,14 @@ export default function Home() {
         setLoading(false);
       }
     }
-    loadFirstPage();
-  }, [filterParams]);
+    loadPage();
+  }, [currentPage, filterParams]);
 
-  // Infinite scroll — fetch next page when sentinel is visible
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      async (entries) => {
-        if (!entries[0].isIntersecting || loadingMore || !hasMore || !API_URL) return;
-
-        setLoadingMore(true);
-        const nextPage = pageRef.current + 1;
-        try {
-          const json = await fetchFilter({ ...filterParams, page: nextPage, perPage: PER_PAGE });
-          const newData = (json.data || []).map(mapItem);
-          if (newData.length === 0) {
-            setHasMore(false);
-          } else {
-            newData.sort((a, b) => b.discount_rate - a.discount_rate);
-            setFiltered((prev) => [...prev, ...newData]);
-            pageRef.current = nextPage;
-            setHasMore(newData.length === PER_PAGE);
-          }
-        } catch (err) {
-          console.error(err);
-        } finally {
-          setLoadingMore(false);
-        }
-      },
-      { rootMargin: "300px" }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [filterParams, loadingMore, hasMore]);
+  function handlePageChange(page) {
+    setCurrentPage(page);
+    // Scroll feed back to top
+    document.querySelector(".feed-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   return (
     <main className="h-screen w-full flex overflow-hidden bg-white text-gray-900">
@@ -146,7 +162,7 @@ export default function Home() {
         </header>
 
         {/* Scrollable Feed */}
-        <div className="flex-1 overflow-y-auto w-full bg-slate-50 scroll-smooth shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]">
+        <div className="feed-scroll flex-1 overflow-y-auto w-full bg-slate-50 scroll-smooth shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]">
           <div className="max-w-2xl mx-auto w-full px-6 py-8">
 
             <TopTabs activeTab={activeTab} onChange={setActiveTab} />
@@ -159,6 +175,9 @@ export default function Home() {
                   <p className="text-sm font-bold text-gray-800">
                     발견된 급매물 <span className="text-red-600">{filtered.length}</span>건
                   </p>
+                  {!loading && totalPages > 1 && (
+                    <p className="text-xs text-gray-400 font-bold">{currentPage} / {totalPages}{hasMore ? "+" : ""} 페이지</p>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-4">
@@ -181,15 +200,12 @@ export default function Home() {
                         </div>
                       ))}
 
-                      {/* Infinite scroll sentinel */}
-                      <div ref={sentinelRef} className="h-4" />
-
-                      {loadingMore && (
-                        <div className="py-4 text-center text-sm font-bold text-gray-400 animate-pulse">불러오는 중...</div>
-                      )}
-                      {!hasMore && filtered.length > 0 && (
-                        <p className="text-center text-xs text-gray-300 py-4">모든 급매물을 불러왔습니다</p>
-                      )}
+                      <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        hasMore={hasMore}
+                        onChange={handlePageChange}
+                      />
                     </>
                   )}
                 </div>
