@@ -8,6 +8,8 @@ import { fetchAiListingTags, fetchFilter } from "../lib/api";
 import FilterBar from "../components/FilterBar";
 import ListingCard from "../components/ListingCard";
 import EmailForm from "../components/EmailForm";
+import TopTabs from "../components/TopTabs";
+import RegionReport from "../components/RegionReport";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -38,6 +40,7 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
+  const [activeTab, setActiveTab] = useState("list");
 
   const [filterParams, setFilterParams] = useState({
     region: "전체",
@@ -174,6 +177,8 @@ export default function Home() {
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-6">
+        <TopTabs activeTab={activeTab} onChange={setActiveTab} />
+
         <FilterBar onFilter={handleFilter} />
 
         {filterParams.aiEnabled && (
@@ -197,97 +202,108 @@ export default function Home() {
 
         {!loading && !error && (
           <>
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-sm text-gray-500">
-                총 <span className="font-semibold text-gray-800">{filtered.length}건</span>의 급매물
-              </p>
+            {activeTab === "list" && (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-sm text-gray-500">
+                    총 <span className="font-semibold text-gray-800">{filtered.length}건</span>의 급매물
+                  </p>
 
-              <div className="flex items-center gap-2">
-                {filterParams.aiEnabled && aiLoading && (
-                  <span className="text-xs text-blue-500">AI 태그 계산 중...</span>
-                )}
+                  <div className="flex items-center gap-2">
+                    {filterParams.aiEnabled && aiLoading && (
+                      <span className="text-xs text-blue-500">AI 태그 계산 중...</span>
+                    )}
 
-                <span className="text-xs text-gray-400">페이지당</span>
-                {[20, 50, 100].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => {
-                      setPerPage(n);
-                      setPage(1);
-                    }}
-                    className={`text-xs px-3 py-1.5 rounded-lg border transition ${
-                      perPage === n
-                        ? "bg-blue-600 text-white border-blue-600"
-                        : "bg-white text-gray-500 border-gray-200 hover:border-blue-300"
-                    }`}
-                  >
-                    {n}개
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {displayListings.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {displayListings.map((listing) => (
-                  <ListingCard
-                    key={listing.id}
-                    listing={listing}
-                    aiEnabled={filterParams.aiEnabled}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-16 text-gray-400 text-sm">
-                조건에 맞는 급매물이 없습니다
-              </div>
-            )}
-
-            {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-2 mt-6">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-30 hover:border-blue-300 transition"
-                >
-                  이전
-                </button>
-
-                {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
-                  .reduce((acc, p, idx, arr) => {
-                    if (idx > 0 && p - arr[idx - 1] > 1) acc.push("...");
-                    acc.push(p);
-                    return acc;
-                  }, [])
-                  .map((p, idx) =>
-                    p === "..." ? (
-                      <span key={`dot-${idx}`} className="text-gray-300 text-sm">
-                        ···
-                      </span>
-                    ) : (
+                    <span className="text-xs text-gray-400">페이지당</span>
+                    {[20, 50, 100].map((n) => (
                       <button
-                        key={p}
-                        onClick={() => setPage(p)}
-                        className={`w-8 h-8 text-sm rounded-lg border transition ${
-                          page === p
+                        key={n}
+                        onClick={() => {
+                          setPerPage(n);
+                          setPage(1);
+                        }}
+                        className={`text-xs px-3 py-1.5 rounded-lg border transition ${
+                          perPage === n
                             ? "bg-blue-600 text-white border-blue-600"
                             : "bg-white text-gray-500 border-gray-200 hover:border-blue-300"
                         }`}
                       >
-                        {p}
+                        {n}개
                       </button>
-                    )
-                  )}
+                    ))}
+                  </div>
+                </div>
 
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-30 hover:border-blue-300 transition"
-                >
-                  다음
-                </button>
-              </div>
+                {displayListings.length > 0 ? (
+                  <div className="flex flex-col gap-2">
+                    {displayListings.map((listing) => (
+                      <ListingCard
+                        key={listing.id}
+                        listing={listing}
+                        aiEnabled={filterParams.aiEnabled}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-16 text-gray-400 text-sm">
+                    조건에 맞는 급매물이 없습니다
+                  </div>
+                )}
+
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-2 mt-6">
+                    <button
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={page === 1}
+                      className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-30 hover:border-blue-300 transition"
+                    >
+                      이전
+                    </button>
+
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+                      .reduce((acc, p, idx, arr) => {
+                        if (idx > 0 && p - arr[idx - 1] > 1) acc.push("...");
+                        acc.push(p);
+                        return acc;
+                      }, [])
+                      .map((p, idx) =>
+                        p === "..." ? (
+                          <span key={`dot-${idx}`} className="text-gray-300 text-sm">
+                            ···
+                          </span>
+                        ) : (
+                          <button
+                            key={p}
+                            onClick={() => setPage(p)}
+                            className={`w-8 h-8 text-sm rounded-lg border transition ${
+                              page === p
+                                ? "bg-blue-600 text-white border-blue-600"
+                                : "bg-white text-gray-500 border-gray-200 hover:border-blue-300"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        )
+                      )}
+
+                    <button
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={page === totalPages}
+                      className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-30 hover:border-blue-300 transition"
+                    >
+                      다음
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {activeTab === "report" && (
+              <RegionReport
+                listings={filtered}
+                aiEnabled={filterParams.aiEnabled}
+              />
             )}
           </>
         )}
