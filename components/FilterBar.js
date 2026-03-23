@@ -1,137 +1,83 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { regions, grades } from "../data/dummy";
+import { useState } from "react";
+
+const URGENGY_GRADES = ["전체", "초급매", "급매", "저평가"];
+const REGIONS = ["전체", "강남구", "서초구", "송파구", "마포구", "용산구", "성동구", "노원구"];
 
 export default function FilterBar({ onFilter }) {
   const [region, setRegion] = useState("전체");
   const [grade, setGrade] = useState("전체");
-  const [maxDiscount, setMaxDiscount] = useState(5);
-  const [aiEnabled, setAiEnabled] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("apt-alert-ai-enabled");
-    if (saved === "true") {
-      setAiEnabled(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("apt-alert-ai-enabled", String(aiEnabled));
-  }, [aiEnabled]);
+  const [maxDiscount, setMaxDiscount] = useState(10);
 
   function handleApply() {
-    onFilter({
-      region,
-      grade,
-      maxDiscount,
-      aiEnabled,
-    });
+    onFilter({ region, grade, maxDiscount });
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
-      <div className="flex items-start justify-between gap-4 mb-4">
+    <div className="bg-white rounded-2xl shadow-[0_8px_30px_-4px_rgba(0,0,0,0.04)] border border-gray-100 p-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        {/* Region */}
         <div>
-          <h2 className="text-base font-semibold text-gray-800">급매물 검색 조건</h2>
-          <p className="text-xs text-gray-400 mt-1">
-            AI 해석은 선택적으로 켜고 끌 수 있습니다.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setAiEnabled((prev) => !prev)}
-          className={`relative inline-flex h-7 w-14 items-center rounded-full transition ${
-            aiEnabled ? "bg-blue-600" : "bg-gray-300"
-          }`}
-          aria-pressed={aiEnabled}
-        >
-          <span
-            className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
-              aiEnabled ? "translate-x-8" : "translate-x-1"
-            }`}
-          />
-        </button>
-      </div>
-
-      <div className="mb-5 flex items-center gap-2">
-        <span
-          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-            aiEnabled
-              ? "bg-blue-50 text-blue-700 border border-blue-200"
-              : "bg-gray-100 text-gray-500 border border-gray-200"
-          }`}
-        >
-          AI 해석 {aiEnabled ? "ON" : "OFF"}
-        </span>
-
-        <span className="text-xs text-gray-400">
-          {aiEnabled
-            ? "가격 + 역세권/학교/병원/생활편의 태그를 표시합니다"
-            : "기본 필터만 사용합니다"}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">지역</label>
+          <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">타겟 지역</label>
           <select
-            className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all cursor-pointer appearance-none"
+            style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundPosition: `right 12px center`, backgroundRepeat: `no-repeat`, backgroundSize: `16px` }}
             value={region}
             onChange={(e) => setRegion(e.target.value)}
           >
-            {regions.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
+            {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
 
+        {/* Grade */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">급매 등급</label>
+          <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">급매 타격점</label>
           <select
-            className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all cursor-pointer appearance-none"
+             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundPosition: `right 12px center`, backgroundRepeat: `no-repeat`, backgroundSize: `16px` }}
             value={grade}
             onChange={(e) => setGrade(e.target.value)}
           >
-            {grades.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
+            {URGENGY_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">
-            최소 할인율
-            <span className="ml-2 text-blue-600 font-semibold">{maxDiscount}% 이상</span>
+        {/* Slider */}
+        <div className="flex flex-col justify-center mt-1">
+          <label className="flex justify-between items-center text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+            최소 하락폭 <span className="text-red-600 bg-red-50 px-2 py-0.5 rounded-md">{maxDiscount}% 이상</span>
           </label>
+          
           <input
-            type="range"
-            min={0}
-            max={40}
+            type="range" 
+            min={5} 
+            max={40} 
             step={1}
             value={maxDiscount}
             onChange={(e) => setMaxDiscount(Number(e.target.value))}
-            className="w-full accent-blue-500"
+            className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-red-600 outline-none"
+            style={{
+              // Dynamically calculate the fill percentage
+              background: `linear-gradient(to right, #dc2626 ${((maxDiscount - 5) / (40 - 5)) * 100}%, #e5e7eb ${((maxDiscount - 5) / (40 - 5)) * 100}%)`
+            }}
           />
-          <div className="flex justify-between text-xs text-gray-300 mt-1">
-            <span>0%</span>
-            <span>20%</span>
-            <span>40%</span>
-          </div>
         </div>
       </div>
 
-      <button
-        onClick={handleApply}
-        className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-sm font-semibold py-3 rounded-xl transition-all"
-      >
-        급매물 검색
-      </button>
+      <div className="mt-6 pt-5 border-t border-gray-100 flex items-center justify-between">
+        <p className="text-[11px] font-bold text-gray-400 tracking-wider hidden md:flex items-center gap-2">
+           <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+           AI 레이더 실시간 가동 중
+        </p>
+        <button
+          onClick={handleApply}
+          className="w-full md:w-auto bg-red-600 hover:bg-red-700 active:scale-95 text-white text-sm font-black px-8 py-3 rounded-xl transition-all shadow-[0_4px_12px_rgba(220,38,38,0.3)]"
+        >
+          레이더 스캔
+        </button>
+      </div>
     </div>
   );
 }
