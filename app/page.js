@@ -64,7 +64,7 @@ export default function Home() {
             minDiscount: filterParams.maxDiscount,
           });
 
-          data = json.data.map(mapItem);
+          data = (json.data || []).map(mapItem);
         } else {
           await new Promise((r) => setTimeout(r, 300));
           data = applyFilter(enrichListings(dummyListings), {

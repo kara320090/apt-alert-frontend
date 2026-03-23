@@ -43,7 +43,7 @@ export default function ListingCard({ listing, aiEnabled = false }) {
           </div>
 
           <div className="flex items-center gap-3">
-            <span className={`text-sm font-bold ${style.text}`}>−{listing.discount_rate}%</span>
+            <span className={`text-sm font-bold ${style.text}`}>−{listing.discount_rate ?? "?"}%</span>
             <span className="text-sm font-semibold text-gray-800">{formatPrice(listing.price)}</span>
             <span className="text-gray-300 text-sm">{open ? "▲" : "▼"}</span>
           </div>
