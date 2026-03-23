@@ -62,7 +62,7 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     let boundsExtended = false;
 
     listings.forEach((listing) => {
-      const address = `${listing.region_name} ${listing.apt_name}`;
+      const address = `${listing.dong_name || listing.region_name} ${listing.apt_name}`;
       
       geocoder.addressSearch(address, (result, status) => {
         if (status === window.kakao.maps.services.Status.OK) {
