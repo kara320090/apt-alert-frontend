@@ -56,80 +56,98 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
     let cancelled = false;
 
-    const initMap = () => {
-      if (!window.kakao?.maps) {
+    const fail = (message) => {
+      if (!cancelled) {
         setStatus("error");
-        setError("카카오맵 SDK를 찾지 못했습니다.");
+        setError(message);
+      }
+    };
+
+    const createMapNow = () => {
+      try {
+        if (!window.kakao?.maps?.Map || !window.kakao?.maps?.LatLng) {
+          fail("카카오맵 생성자를 찾지 못했습니다.");
+          return;
+        }
+
+        if (!mapElRef.current || !roadviewElRef.current) {
+          fail("지도 DOM을 찾지 못했습니다.");
+          return;
+        }
+
+        const center = new window.kakao.maps.LatLng(37.5665, 126.9780);
+
+        const map = new window.kakao.maps.Map(mapElRef.current, {
+          center,
+          level: 6,
+        });
+
+        const roadview = new window.kakao.maps.Roadview(roadviewElRef.current);
+        const roadviewClient = new window.kakao.maps.RoadviewClient();
+
+        mapRef.current = map;
+        roadviewRef.current = roadview;
+        roadviewClientRef.current = roadviewClient;
+
+        setStatus("ready");
+        setError("");
+
+        setTimeout(() => {
+          try {
+            map.relayout();
+          } catch {}
+        }, 80);
+      } catch (err) {
+        fail(err?.message || "지도 초기화에 실패했습니다.");
+      }
+    };
+
+    const handleReady = () => {
+      if (cancelled) return;
+
+      if (window.kakao?.maps?.Map) {
+        createMapNow();
         return;
       }
 
-      window.kakao.maps.load(() => {
-        if (cancelled) return;
-        if (!mapElRef.current || !roadviewElRef.current) return;
+      if (typeof window.kakao?.maps?.load === "function") {
+        window.kakao.maps.load(() => {
+          if (!cancelled) createMapNow();
+        });
+        return;
+      }
 
-        try {
-          const center = new window.kakao.maps.LatLng(37.5665, 126.978);
-          const map = new window.kakao.maps.Map(mapElRef.current, {
-            center,
-            level: 6,
-          });
-
-          const roadview = new window.kakao.maps.Roadview(roadviewElRef.current);
-          const roadviewClient = new window.kakao.maps.RoadviewClient();
-
-          mapRef.current = map;
-          roadviewRef.current = roadview;
-          roadviewClientRef.current = roadviewClient;
-
-          setStatus("ready");
-          setError("");
-
-          setTimeout(() => {
-            map.relayout();
-          }, 50);
-        } catch (err) {
-          setStatus("error");
-          setError(err?.message || "지도 초기화에 실패했습니다.");
-        }
-      });
+      fail("카카오맵 SDK 초기화에 실패했습니다.");
     };
 
     if (window.kakao?.maps) {
-      initMap();
+      handleReady();
       return () => {
         cancelled = true;
       };
     }
 
     const existing = document.querySelector('script[data-kakao-map="true"]');
+
     if (existing) {
-      existing.addEventListener("load", initMap, { once: true });
+      existing.addEventListener("load", handleReady, { once: true });
       existing.addEventListener(
         "error",
-        () => {
-          setStatus("error");
-          setError("카카오맵 SDK 스크립트 로드 실패");
-        },
+        () => fail("카카오맵 SDK 스크립트 로드 실패"),
         { once: true }
       );
-      return () => {
-        cancelled = true;
-      };
+    } else {
+      const script = document.createElement("script");
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false&libraries=services,roadview`;
+      script.async = true;
+      script.defer = true;
+      script.dataset.kakaoMap = "true";
+
+      script.onload = handleReady;
+      script.onerror = () => fail("카카오맵 SDK 스크립트 로드 실패");
+
+      document.head.appendChild(script);
     }
-
-    const script = document.createElement("script");
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false&libraries=services,roadview`;
-    script.async = true;
-    script.defer = true;
-    script.dataset.kakaoMap = "true";
-
-    script.onload = initMap;
-    script.onerror = () => {
-      setStatus("error");
-      setError("카카오맵 SDK 스크립트 로드 실패. 앱 키와 도메인 등록을 확인하세요.");
-    };
-
-    document.head.appendChild(script);
 
     return () => {
       cancelled = true;
@@ -159,11 +177,19 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
     const finalize = () => {
       completed += 1;
+
       if (completed === listings.length) {
         setPointCount(found);
+
         if (found > 0) {
-          map.setBounds(bounds);
-          setTimeout(() => map.relayout(), 50);
+          try {
+            map.setBounds(bounds);
+            setTimeout(() => {
+              try {
+                map.relayout();
+              } catch {}
+            }, 80);
+          } catch {}
         }
       }
     };
@@ -248,11 +274,14 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     const roadview = roadviewRef.current;
     const roadviewClient = roadviewClientRef.current;
 
-    const lat = getLat(selectedListing);
-    const lng = getLng(selectedListing);
-
     const moveTo = (coords) => {
       map.panTo(coords);
+
+      setTimeout(() => {
+        try {
+          map.setLevel(3);
+        } catch {}
+      }, 150);
 
       if (viewMode === "roadview") {
         roadviewClient.getNearestPanoId(coords, 300, (panoId) => {
@@ -263,12 +292,16 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
       }
     };
 
+    const lat = getLat(selectedListing);
+    const lng = getLng(selectedListing);
+
     if (lat !== null && lng !== null) {
       moveTo(new window.kakao.maps.LatLng(lat, lng));
       return;
     }
 
     if (!window.kakao?.maps?.services) return;
+
     const places = new window.kakao.maps.services.Places();
     const keyword = `${getDongName(selectedListing)} ${getAptName(selectedListing)}`.trim();
 
@@ -284,19 +317,30 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
   useEffect(() => {
     if (viewMode === "map" && mapRef.current) {
-      setTimeout(() => mapRef.current?.relayout(), 50);
+      setTimeout(() => {
+        try {
+          mapRef.current?.relayout();
+        } catch {}
+      }, 80);
     }
+
     if (viewMode === "roadview" && roadviewRef.current) {
-      setTimeout(() => roadviewRef.current?.relayout(), 50);
+      setTimeout(() => {
+        try {
+          roadviewRef.current?.relayout();
+        } catch {}
+      }, 80);
     }
   }, [viewMode]);
 
+  const showNoPointOverlay = status === "ready" && listings.length > 0 && pointCount === 0;
+
   return (
-    <div className="w-full h-full min-h-[520px] relative bg-slate-100 overflow-hidden rounded-2xl border border-gray-200">
+    <div className="w-full h-full min-h-[520px] relative bg-slate-100 overflow-hidden">
       {status === "loading" && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-20">
           <span className="text-slate-400 font-bold tracking-widest uppercase animate-pulse text-sm">
-            위성 데이터 수신 중...
+            지도 엔진 초기화 중...
           </span>
         </div>
       )}
@@ -304,13 +348,13 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
       {status === "error" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 z-20 px-6 text-center">
           <p className="text-red-500 font-semibold mb-2">지도를 불러오지 못했습니다.</p>
-          <p className="text-sm text-slate-500">{error}</p>
+          <p className="text-sm text-slate-500 whitespace-pre-wrap">{error}</p>
         </div>
       )}
 
-      {status === "ready" && pointCount === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10 px-6 text-center">
-          <p className="text-sm font-semibold text-slate-500">
+      {showNoPointOverlay && (
+        <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
+          <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
             지도에 표시할 좌표를 찾지 못했습니다.
           </p>
         </div>
