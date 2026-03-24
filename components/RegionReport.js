@@ -1,10 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { buildRegionAiSummary, buildRegionReport } from "../lib/report";
 
-export default function RegionReport({ listings, aiEnabled, regions }) {
-  const [selectedRegion, setSelectedRegion] = useState("전체");
+export default function RegionReport({
+  listings,
+  aiEnabled,
+  regions = ["전체"],
+  selectedRegion: externalSelectedRegion = "전체",
+}) {
+  const [selectedRegion, setSelectedRegion] = useState(externalSelectedRegion);
+
+  useEffect(() => {
+    setSelectedRegion(externalSelectedRegion || "전체");
+  }, [externalSelectedRegion]);
 
   const report = useMemo(() => {
     return buildRegionReport(listings, selectedRegion);
@@ -23,9 +32,9 @@ export default function RegionReport({ listings, aiEnabled, regions }) {
           onChange={(e) => setSelectedRegion(e.target.value)}
           className="w-full md:w-72 border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50"
         >
-          {regions.map((region) => (
-            <option key={region} value={region}>
-              {region}
+          {regions.map((r) => (
+            <option key={r} value={r}>
+              {r}
             </option>
           ))}
         </select>
@@ -73,7 +82,8 @@ export default function RegionReport({ listings, aiEnabled, regions }) {
               >
                 <div className="text-sm font-semibold text-gray-800">{row.month}</div>
                 <div className="text-xs text-gray-500 mt-1 md:mt-0">
-                  급매물 {row.count}건 · 평균 할인율 {row.avgDiscount}% · 초급매 비중 {row.superUrgentRatio}%
+                  급매물 {row.count}건 · 평균 할인율 {row.avgDiscount}% · 초급매 비중{" "}
+                  {row.superUrgentRatio}%
                 </div>
               </div>
             ))

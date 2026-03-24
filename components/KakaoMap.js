@@ -1,174 +1,353 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const KAKAO_MAP_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
 
+function getAptName(item) {
+  return item?.apt_name || item?.properties?.apt_name || "";
+}
+
+function getDongName(item) {
+  return item?.dong_name || item?.region_name || item?.properties?.dong || "";
+}
+
+function getLat(item) {
+  const v = item?.lat ?? item?.properties?.lat;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getLng(item) {
+  const v = item?.lng ?? item?.properties?.lng;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default function KakaoMap({ listings = [], selectedId = null }) {
+  const mapElRef = useRef(null);
+  const roadviewElRef = useRef(null);
+
   const mapRef = useRef(null);
   const roadviewRef = useRef(null);
-  
-  const mapInstanceRef = useRef(null);
-  const roadviewInstanceRef = useRef(null);
   const roadviewClientRef = useRef(null);
-  const markersRef = useRef({});
-  
-  const [mapStatus, setMapStatus] = useState("loading");
-  const [activeView, setActiveView] = useState("map"); // 'map' or 'roadview'
+
+  const markersRef = useRef([]);
+  const overlaysRef = useRef([]);
+
+  const [status, setStatus] = useState("loading"); // loading | ready | error
+  const [error, setError] = useState("");
+  const [viewMode, setViewMode] = useState("map"); // map | roadview
+  const [pointCount, setPointCount] = useState(0);
+
+  const selectedListing = useMemo(
+    () => listings.find((item) => item.id === selectedId) || null,
+    [listings, selectedId]
+  );
 
   useEffect(() => {
-    if (typeof window === "undefined" || !KAKAO_MAP_KEY) return;
+    if (typeof window === "undefined") return;
 
-    const initKakao = () => {
+    if (!KAKAO_MAP_KEY) {
+      setStatus("error");
+      setError("NEXT_PUBLIC_KAKAO_MAP_KEY가 없습니다.");
+      return;
+    }
+
+    let cancelled = false;
+
+    const initMap = () => {
+      if (!window.kakao?.maps) {
+        setStatus("error");
+        setError("카카오맵 SDK를 찾지 못했습니다.");
+        return;
+      }
+
       window.kakao.maps.load(() => {
-        if (!mapRef.current || !roadviewRef.current) return;
-        
-        // 1. Init Map
-        const center = new window.kakao.maps.LatLng(37.5665, 126.9780);
-        const map = new window.kakao.maps.Map(mapRef.current, { center, level: 6 });
-        
-        // 2. Init Roadview
-        const roadview = new window.kakao.maps.Roadview(roadviewRef.current);
-        const roadviewClient = new window.kakao.maps.RoadviewClient();
+        if (cancelled) return;
+        if (!mapElRef.current || !roadviewElRef.current) return;
 
-        mapInstanceRef.current = map;
-        roadviewInstanceRef.current = roadview;
-        roadviewClientRef.current = roadviewClient;
-        
-        setMapStatus("ready");
+        try {
+          const center = new window.kakao.maps.LatLng(37.5665, 126.978);
+          const map = new window.kakao.maps.Map(mapElRef.current, {
+            center,
+            level: 6,
+          });
+
+          const roadview = new window.kakao.maps.Roadview(roadviewElRef.current);
+          const roadviewClient = new window.kakao.maps.RoadviewClient();
+
+          mapRef.current = map;
+          roadviewRef.current = roadview;
+          roadviewClientRef.current = roadviewClient;
+
+          setStatus("ready");
+          setError("");
+
+          setTimeout(() => {
+            map.relayout();
+          }, 50);
+        } catch (err) {
+          setStatus("error");
+          setError(err?.message || "지도 초기화에 실패했습니다.");
+        }
       });
     };
 
-    if (window.kakao && window.kakao.maps) {
-      initKakao();
-    } else {
-      const script = document.createElement("script");
-      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false&libraries=services,roadview`;
-      script.onload = initKakao;
-      document.head.appendChild(script);
+    if (window.kakao?.maps) {
+      initMap();
+      return () => {
+        cancelled = true;
+      };
     }
+
+    const existing = document.querySelector('script[data-kakao-map="true"]');
+    if (existing) {
+      existing.addEventListener("load", initMap, { once: true });
+      existing.addEventListener(
+        "error",
+        () => {
+          setStatus("error");
+          setError("카카오맵 SDK 스크립트 로드 실패");
+        },
+        { once: true }
+      );
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const script = document.createElement("script");
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false&libraries=services,roadview`;
+    script.async = true;
+    script.defer = true;
+    script.dataset.kakaoMap = "true";
+
+    script.onload = initMap;
+    script.onerror = () => {
+      setStatus("error");
+      setError("카카오맵 SDK 스크립트 로드 실패. 앱 키와 도메인 등록을 확인하세요.");
+    };
+
+    document.head.appendChild(script);
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Plot Markers
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map || !window.kakao?.maps?.services) return;
+    if (status !== "ready") return;
+    if (!window.kakao?.maps) return;
+    if (!mapRef.current) return;
 
-    Object.values(markersRef.current).forEach(m => m.overlay.setMap(null));
-    markersRef.current = {};
+    const map = mapRef.current;
 
-    const geocoder = new window.kakao.maps.services.Geocoder();
+    markersRef.current.forEach((marker) => marker.setMap(null));
+    overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    markersRef.current = [];
+    overlaysRef.current = [];
+
+    if (!listings.length) {
+      setPointCount(0);
+      return;
+    }
+
     const bounds = new window.kakao.maps.LatLngBounds();
-    let boundsExtended = false;
+    let found = 0;
+    let completed = 0;
+
+    const finalize = () => {
+      completed += 1;
+      if (completed === listings.length) {
+        setPointCount(found);
+        if (found > 0) {
+          map.setBounds(bounds);
+          setTimeout(() => map.relayout(), 50);
+        }
+      }
+    };
+
+    const paintMarker = (listing, coords) => {
+      const marker = new window.kakao.maps.Marker({
+        position: coords,
+      });
+      marker.setMap(map);
+      markersRef.current.push(marker);
+
+      if (listing.id === selectedId) {
+        const overlay = new window.kakao.maps.CustomOverlay({
+          position: coords,
+          yAnchor: 1.8,
+          content: `
+            <div style="
+              background:#111827;
+              color:white;
+              padding:8px 10px;
+              border-radius:10px;
+              font-size:12px;
+              font-weight:700;
+              box-shadow:0 4px 14px rgba(0,0,0,0.18);
+              white-space:nowrap;
+            ">
+              ${getAptName(listing) || "선택 매물"}
+            </div>
+          `,
+        });
+        overlay.setMap(map);
+        overlaysRef.current.push(overlay);
+      }
+
+      bounds.extend(coords);
+      found += 1;
+    };
+
+    const places = window.kakao.maps.services
+      ? new window.kakao.maps.services.Places()
+      : null;
 
     listings.forEach((listing) => {
-      const address = `${listing.dong_name || listing.region_name} ${listing.apt_name}`;
-      
-      geocoder.addressSearch(address, (result, status) => {
-        if (status === window.kakao.maps.services.Status.OK) {
+      const lat = getLat(listing);
+      const lng = getLng(listing);
+
+      if (lat !== null && lng !== null) {
+        const coords = new window.kakao.maps.LatLng(lat, lng);
+        paintMarker(listing, coords);
+        finalize();
+        return;
+      }
+
+      if (!places) {
+        finalize();
+        return;
+      }
+
+      const keyword = `${getDongName(listing)} ${getAptName(listing)}`.trim();
+
+      if (!keyword) {
+        finalize();
+        return;
+      }
+
+      places.keywordSearch(keyword, (result, searchStatus) => {
+        if (searchStatus === window.kakao.maps.services.Status.OK && result?.[0]) {
           const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
-          const isSuper = listing.grade === "초급매";
-          
-          const content = `
-            <div class="px-2.5 py-1 bg-white rounded-lg shadow-[0_4px_12px_rgba(0,0,0,0.15)] border-2 ${isSuper ? 'border-red-600' : 'border-orange-500'} text-[11px] font-black text-gray-900 whitespace-nowrap transition-transform hover:scale-110">
-              <span class="${isSuper ? 'text-red-600' : 'text-orange-500'}">-${listing.discount_rate}%</span> 
-              ${Math.floor(listing.price/10000)}억
-            </div>
-          `;
-
-          const customOverlay = new window.kakao.maps.CustomOverlay({
-            position: coords,
-            content: content,
-            yAnchor: 1
-          });
-
-          customOverlay.setMap(map);
-          markersRef.current[listing.id] = { overlay: customOverlay, coords };
-
-          bounds.extend(coords);
-          boundsExtended = true;
-          
-          if (boundsExtended) map.setBounds(bounds);
+          paintMarker(listing, coords);
         }
+        finalize();
       });
     });
-  }, [listings, mapStatus]);
+  }, [listings, selectedId, status]);
 
-  // Handle Click -> Map Pan & Roadview Sync
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
+    if (status !== "ready") return;
+    if (!selectedListing) return;
+    if (!mapRef.current || !roadviewRef.current || !roadviewClientRef.current) return;
 
-    Object.values(markersRef.current).forEach(m => m.overlay.setZIndex(1));
+    const map = mapRef.current;
+    const roadview = roadviewRef.current;
+    const roadviewClient = roadviewClientRef.current;
 
-    if (selectedId && markersRef.current[selectedId]) {
-      const target = markersRef.current[selectedId];
-      target.overlay.setZIndex(50);
+    const lat = getLat(selectedListing);
+    const lng = getLng(selectedListing);
 
-      // Always pan the map
-      map.panTo(target.coords);
+    const moveTo = (coords) => {
+      map.panTo(coords);
 
-      // Sync Roadview if active and available
-      const rv = roadviewInstanceRef.current;
-      const rvClient = roadviewClientRef.current;
-      if (activeView === "roadview" && rv && rvClient) {
-        rvClient.getNearestPanoId(target.coords, 500, (panoId) => {
-          if (panoId) rv.setPanoId(panoId, target.coords);
+      if (viewMode === "roadview") {
+        roadviewClient.getNearestPanoId(coords, 300, (panoId) => {
+          if (panoId) {
+            roadview.setPanoId(panoId, coords);
+          }
         });
       }
-    }
-  }, [selectedId, activeView]);
+    };
 
-  // Re-layout maps when toggling visibility
+    if (lat !== null && lng !== null) {
+      moveTo(new window.kakao.maps.LatLng(lat, lng));
+      return;
+    }
+
+    if (!window.kakao?.maps?.services) return;
+    const places = new window.kakao.maps.services.Places();
+    const keyword = `${getDongName(selectedListing)} ${getAptName(selectedListing)}`.trim();
+
+    if (!keyword) return;
+
+    places.keywordSearch(keyword, (result, searchStatus) => {
+      if (searchStatus === window.kakao.maps.services.Status.OK && result?.[0]) {
+        const coords = new window.kakao.maps.LatLng(result[0].y, result[0].x);
+        moveTo(coords);
+      }
+    });
+  }, [selectedListing, viewMode, status]);
+
   useEffect(() => {
-    setTimeout(() => {
-      if (activeView === "map" && mapInstanceRef.current) mapInstanceRef.current.relayout();
-      if (activeView === "roadview" && roadviewInstanceRef.current) roadviewInstanceRef.current.relayout();
-    }, 50);
-  }, [activeView]);
+    if (viewMode === "map" && mapRef.current) {
+      setTimeout(() => mapRef.current?.relayout(), 50);
+    }
+    if (viewMode === "roadview" && roadviewRef.current) {
+      setTimeout(() => roadviewRef.current?.relayout(), 50);
+    }
+  }, [viewMode]);
 
   return (
-    <div className="w-full h-full relative bg-slate-100 overflow-hidden">
-      
-      {/* Loading State */}
-      {mapStatus === "loading" && (
+    <div className="w-full h-full min-h-[520px] relative bg-slate-100 overflow-hidden rounded-2xl border border-gray-200">
+      {status === "loading" && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-20">
-          <span className="text-slate-400 font-bold tracking-widest uppercase animate-pulse text-sm">위성 데이터 수신 중...</span>
+          <span className="text-slate-400 font-bold tracking-widest uppercase animate-pulse text-sm">
+            위성 데이터 수신 중...
+          </span>
         </div>
       )}
 
-      {/* Floating View Toggle */}
+      {status === "error" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 z-20 px-6 text-center">
+          <p className="text-red-500 font-semibold mb-2">지도를 불러오지 못했습니다.</p>
+          <p className="text-sm text-slate-500">{error}</p>
+        </div>
+      )}
+
+      {status === "ready" && pointCount === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10 px-6 text-center">
+          <p className="text-sm font-semibold text-slate-500">
+            지도에 표시할 좌표를 찾지 못했습니다.
+          </p>
+        </div>
+      )}
+
       <div className="absolute top-6 right-6 z-30 bg-white rounded-lg shadow-[0_4px_20px_rgba(0,0,0,0.1)] p-1 flex border border-slate-200">
-        <button 
-          onClick={() => setActiveView("map")}
+        <button
+          onClick={() => setViewMode("map")}
           className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
-            activeView === "map" ? "bg-gray-900 text-white shadow-sm" : "text-gray-400 hover:text-gray-900"
+            viewMode === "map" ? "bg-gray-900 text-white shadow-sm" : "text-gray-400 hover:text-gray-900"
           }`}
         >
           레이더 맵
         </button>
-        <button 
-          onClick={() => setActiveView("roadview")}
+        <button
+          onClick={() => setViewMode("roadview")}
           className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
-            activeView === "roadview" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-blue-600"
+            viewMode === "roadview" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-blue-600"
           }`}
         >
           스트리트 뷰
         </button>
       </div>
 
-      {/* Map Container */}
-      <div 
-        ref={mapRef} 
-        className={`w-full h-full absolute inset-0 transition-opacity duration-300 ${activeView === "map" ? "opacity-100 z-10" : "opacity-0 pointer-events-none"}`} 
+      <div
+        ref={mapElRef}
+        className={`w-full h-full absolute inset-0 transition-opacity duration-300 ${
+          viewMode === "map" ? "opacity-100 z-0" : "opacity-0 pointer-events-none"
+        }`}
       />
 
-      {/* Roadview Container */}
-      <div 
-        ref={roadviewRef} 
-        className={`w-full h-full absolute inset-0 transition-opacity duration-300 ${activeView === "roadview" ? "opacity-100 z-10" : "opacity-0 pointer-events-none"}`} 
+      <div
+        ref={roadviewElRef}
+        className={`w-full h-full absolute inset-0 transition-opacity duration-300 ${
+          viewMode === "roadview" ? "opacity-100 z-0" : "opacity-0 pointer-events-none"
+        }`}
       />
-
     </div>
   );
 }
