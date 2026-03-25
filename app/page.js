@@ -114,7 +114,7 @@ export default function Home() {
   const [error, setError] = useState(null);
 
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
+  const [perPage] = useState(20);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
@@ -297,7 +297,7 @@ export default function Home() {
 
   return (
     <main className="h-screen w-full flex overflow-hidden bg-white text-gray-900">
-      <div className="w-full md:w-[45%] lg:w-[40%] h-full flex flex-col border-r border-gray-200 z-10 shadow-2xl relative bg-white">
+      <div className="w-full md:w-[34%] lg:w-[30%] min-w-[320px] max-w-[420px] h-full flex flex-col border-r border-gray-200 z-10 shadow-2xl relative bg-white">
         <header className="px-10 py-6 border-b border-gray-100 bg-white shrink-0 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-black text-red-600 tracking-tight">🚨 급매물 알리미</h1>
@@ -330,8 +330,8 @@ export default function Home() {
             {activeTab === "list" ? (
               <>
                 <FilterBar
-                  value={filters}
-                  onSubmit={handleFilterSubmit}
+                  initialValue={filters}
+                  onFilter={handleFilterSubmit}
                   regions={regions}
                 />
 
@@ -386,7 +386,7 @@ export default function Home() {
                         <div
                           key={listing.id}
                           onClick={() => setSelectedListing(listing)}
-                          className={`w-full rounded-2xl transition-all duration-200 cursor-pointer ${
+                          className={`w-full rounded-2xl cursor-pointer transition-all duration-200 ${
                             selected
                               ? "ring-2 ring-red-500 shadow-lg scale-[1.01] bg-red-50/30"
                               : "hover:shadow-md"
@@ -396,6 +396,7 @@ export default function Home() {
                             listing={listing}
                             aiEnabled={filters.aiEnabled}
                             mapMode="panel"
+                            onOpenMap={(item) => setSelectedListing(item)}
                             isSelected={selected}
                           />
                         </div>

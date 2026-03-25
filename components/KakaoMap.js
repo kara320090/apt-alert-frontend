@@ -66,7 +66,6 @@ function loadKakaoSdk() {
 
     document.head.appendChild(script);
 
-    // 혹시 onload가 늦어져도 한 번 더 확인
     setTimeout(() => {
       if (window.kakao?.maps?.Map) {
         resolve(window.kakao);
@@ -99,7 +98,11 @@ function getLng(item) {
 
 export default function KakaoMap({ listings = [], selectedId = null }) {
   const mapElRef = useRef(null);
+  const roadviewElRef = useRef(null);
+
   const mapRef = useRef(null);
+  const roadviewRef = useRef(null);
+  const roadviewClientRef = useRef(null);
 
   const markersRef = useRef([]);
   const selectionOverlayRef = useRef(null);
@@ -109,13 +112,15 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
   const [status, setStatus] = useState("loading"); // loading | ready | error
   const [error, setError] = useState("");
   const [pointCount, setPointCount] = useState(0);
+  const [viewMode, setViewMode] = useState("split"); // map | roadview | split
+  const [roadviewMessage, setRoadviewMessage] = useState("매물을 선택하면 스트리트 뷰를 표시합니다.");
 
   const selectedListing = useMemo(
     () => listings.find((item) => item.id === selectedId) || null,
     [listings, selectedId]
   );
 
-  // 1) 지도는 딱 한 번만 생성
+  // 1) SDK 로드 + 지도/로드뷰 1회 생성
   useEffect(() => {
     let cancelled = false;
 
@@ -124,8 +129,8 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         const kakao = await loadKakaoSdk();
         if (cancelled) return;
 
-        if (!mapElRef.current) {
-          throw new Error("지도 DOM을 찾지 못했습니다.");
+        if (!mapElRef.current || !roadviewElRef.current) {
+          throw new Error("지도 또는 로드뷰 DOM을 찾지 못했습니다.");
         }
 
         if (!initializedRef.current) {
@@ -136,6 +141,9 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
             level: 6,
           });
 
+          roadviewRef.current = new kakao.maps.Roadview(roadviewElRef.current);
+          roadviewClientRef.current = new kakao.maps.RoadviewClient();
+
           initializedRef.current = true;
         }
 
@@ -145,6 +153,9 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         setTimeout(() => {
           try {
             mapRef.current?.relayout();
+          } catch {}
+          try {
+            roadviewRef.current?.relayout();
           } catch {}
         }, 80);
       } catch (err) {
@@ -162,7 +173,7 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     };
   }, []);
 
-  // 2) 목록이 바뀔 때만 마커 전체를 다시 그림 + bounds 맞춤
+  // 2) 목록이 바뀔 때만 전체 마커 갱신 + bounds
   useEffect(() => {
     if (status !== "ready") return;
     if (!window.kakao?.maps) return;
@@ -257,13 +268,19 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     });
   }, [listings, status]);
 
-  // 3) 선택한 매물로 이동 + 자동 확대 + 선택 오버레이
+  // 3) 선택한 매물로 지도 이동 + 확대 + 스트리트뷰 표시
   useEffect(() => {
     if (status !== "ready") return;
+    if (!selectedListing) {
+      setRoadviewMessage("매물을 선택하면 스트리트 뷰를 표시합니다.");
+      return;
+    }
     if (!window.kakao?.maps) return;
-    if (!mapRef.current) return;
+    if (!mapRef.current || !roadviewRef.current || !roadviewClientRef.current) return;
 
     const map = mapRef.current;
+    const roadview = roadviewRef.current;
+    const roadviewClient = roadviewClientRef.current;
     const kakao = window.kakao;
 
     if (selectionOverlayRef.current) {
@@ -271,13 +288,10 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
       selectionOverlayRef.current = null;
     }
 
-    if (!selectedListing) return;
-
     const showSelection = (coords) => {
       try {
         map.panTo(coords);
 
-        // 선택 시 자동 확대: 숫자가 작을수록 더 확대됨
         setTimeout(() => {
           try {
             map.setLevel(2);
@@ -307,6 +321,34 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         overlay.setMap(map);
         selectionOverlayRef.current = overlay;
       } catch {}
+
+      // 공식 문서 방식: getNearestPanoId -> setPanoId
+      // 가까운 로드뷰가 없으면 null이 반환될 수 있음
+      roadviewClient.getNearestPanoId(coords, 50, (panoId) => {
+        if (panoId) {
+          try {
+            roadview.setPanoId(panoId, coords);
+            setRoadviewMessage("");
+          } catch {
+            setRoadviewMessage("스트리트 뷰를 표시하지 못했습니다.");
+          }
+          return;
+        }
+
+        // 50m 내에 없으면 한 번 더 넓게 시도
+        roadviewClient.getNearestPanoId(coords, 200, (fallbackPanoId) => {
+          if (fallbackPanoId) {
+            try {
+              roadview.setPanoId(fallbackPanoId, coords);
+              setRoadviewMessage("");
+            } catch {
+              setRoadviewMessage("스트리트 뷰를 표시하지 못했습니다.");
+            }
+          } else {
+            setRoadviewMessage("선택한 매물 근처에 스트리트 뷰가 없습니다.");
+          }
+        });
+      });
     };
 
     const savedCoords = coordsByIdRef.current.get(selectedListing.id);
@@ -328,16 +370,34 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     const places = new kakao.maps.services.Places();
     const keyword = `${getDongName(selectedListing)} ${getAptName(selectedListing)}`.trim();
 
-    if (!keyword) return;
+    if (!keyword) {
+      setRoadviewMessage("선택한 매물의 위치 키워드를 찾지 못했습니다.");
+      return;
+    }
 
     places.keywordSearch(keyword, (result, searchStatus) => {
       if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
         const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
         coordsByIdRef.current.set(selectedListing.id, coords);
         showSelection(coords);
+      } else {
+        setRoadviewMessage("선택한 매물의 좌표를 찾지 못했습니다.");
       }
     });
   }, [selectedListing, status]);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+
+    setTimeout(() => {
+      try {
+        mapRef.current?.relayout();
+      } catch {}
+      try {
+        roadviewRef.current?.relayout();
+      } catch {}
+    }, 100);
+  }, [viewMode, status]);
 
   const showNoPointOverlay = status === "ready" && listings.length > 0 && pointCount === 0;
 
@@ -358,7 +418,34 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         </div>
       )}
 
-      {showNoPointOverlay && (
+      <div className="absolute top-6 right-6 z-30 bg-white rounded-lg shadow-[0_4px_20px_rgba(0,0,0,0.1)] p-1 flex border border-slate-200 gap-1">
+        <button
+          onClick={() => setViewMode("map")}
+          className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
+            viewMode === "map" ? "bg-gray-900 text-white shadow-sm" : "text-gray-400 hover:text-gray-900"
+          }`}
+        >
+          지도
+        </button>
+        <button
+          onClick={() => setViewMode("split")}
+          className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
+            viewMode === "split" ? "bg-red-600 text-white shadow-sm" : "text-gray-400 hover:text-red-600"
+          }`}
+        >
+          분할
+        </button>
+        <button
+          onClick={() => setViewMode("roadview")}
+          className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
+            viewMode === "roadview" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-blue-600"
+          }`}
+        >
+          스트리트뷰
+        </button>
+      </div>
+
+      {showNoPointOverlay && viewMode !== "roadview" && (
         <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
           <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
             지도에 표시할 좌표를 찾지 못했습니다.
@@ -366,7 +453,47 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         </div>
       )}
 
-      <div ref={mapElRef} className="w-full h-full absolute inset-0" />
+      {viewMode === "map" && (
+        <div ref={mapElRef} className="w-full h-full absolute inset-0" />
+      )}
+
+      {viewMode === "roadview" && (
+        <div className="w-full h-full absolute inset-0">
+          <div ref={roadviewElRef} className="w-full h-full" />
+          {roadviewMessage && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg">
+                {roadviewMessage}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewMode === "split" && (
+        <div className="w-full h-full absolute inset-0 grid grid-cols-2">
+          <div className="relative border-r border-white/60">
+            <div ref={mapElRef} className="w-full h-full" />
+            {showNoPointOverlay && (
+              <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
+                <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
+                  지도에 표시할 좌표를 찾지 못했습니다.
+                </p>
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <div ref={roadviewElRef} className="w-full h-full" />
+            {roadviewMessage && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg">
+                  {roadviewMessage}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
