@@ -66,7 +66,7 @@ function loadKakaoSdk() {
 
     document.head.appendChild(script);
 
-    // 혹시 onload가 늦어지거나 누락되는 경우 대비
+    // 혹시 onload가 늦어져도 한 번 더 확인
     setTimeout(() => {
       if (window.kakao?.maps?.Map) {
         resolve(window.kakao);
@@ -100,8 +100,10 @@ function getLng(item) {
 export default function KakaoMap({ listings = [], selectedId = null }) {
   const mapElRef = useRef(null);
   const mapRef = useRef(null);
+
   const markersRef = useRef([]);
-  const overlaysRef = useRef([]);
+  const selectionOverlayRef = useRef(null);
+  const coordsByIdRef = useRef(new Map());
   const initializedRef = useRef(false);
 
   const [status, setStatus] = useState("loading"); // loading | ready | error
@@ -113,7 +115,7 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     [listings, selectedId]
   );
 
-  // 1. 지도는 딱 한 번만 생성
+  // 1) 지도는 딱 한 번만 생성
   useEffect(() => {
     let cancelled = false;
 
@@ -160,7 +162,7 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     };
   }, []);
 
-  // 2. 목록이 바뀌면 마커만 다시 그림
+  // 2) 목록이 바뀔 때만 마커 전체를 다시 그림 + bounds 맞춤
   useEffect(() => {
     if (status !== "ready") return;
     if (!window.kakao?.maps) return;
@@ -170,9 +172,14 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     const kakao = window.kakao;
 
     markersRef.current.forEach((marker) => marker.setMap(null));
-    overlaysRef.current.forEach((overlay) => overlay.setMap(null));
     markersRef.current = [];
-    overlaysRef.current = [];
+
+    if (selectionOverlayRef.current) {
+      selectionOverlayRef.current.setMap(null);
+      selectionOverlayRef.current = null;
+    }
+
+    coordsByIdRef.current = new Map();
 
     if (!listings.length) {
       setPointCount(0);
@@ -211,30 +218,7 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
       marker.setMap(map);
       markersRef.current.push(marker);
-
-      if (listing.id === selectedId) {
-        const overlay = new kakao.maps.CustomOverlay({
-          position: coords,
-          yAnchor: 1.8,
-          content: `
-            <div style="
-              background:#111827;
-              color:white;
-              padding:8px 10px;
-              border-radius:10px;
-              font-size:12px;
-              font-weight:700;
-              box-shadow:0 4px 14px rgba(0,0,0,0.18);
-              white-space:nowrap;
-            ">
-              ${getAptName(listing) || "선택 매물"}
-            </div>
-          `,
-        });
-
-        overlay.setMap(map);
-        overlaysRef.current.push(overlay);
-      }
+      coordsByIdRef.current.set(listing.id, coords);
 
       bounds.extend(coords);
       found += 1;
@@ -271,34 +255,71 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         finalize();
       });
     });
-  }, [listings, selectedId, status]);
+  }, [listings, status]);
 
-  // 3. 선택한 매물이 바뀌면 해당 위치로 이동 + 자동 확대
+  // 3) 선택한 매물로 이동 + 자동 확대 + 선택 오버레이
   useEffect(() => {
     if (status !== "ready") return;
-    if (!selectedListing) return;
     if (!window.kakao?.maps) return;
     if (!mapRef.current) return;
 
     const map = mapRef.current;
     const kakao = window.kakao;
 
-    const moveTo = (coords) => {
+    if (selectionOverlayRef.current) {
+      selectionOverlayRef.current.setMap(null);
+      selectionOverlayRef.current = null;
+    }
+
+    if (!selectedListing) return;
+
+    const showSelection = (coords) => {
       try {
         map.panTo(coords);
+
+        // 선택 시 자동 확대: 숫자가 작을수록 더 확대됨
         setTimeout(() => {
           try {
-            map.setLevel(3);
+            map.setLevel(2);
           } catch {}
-        }, 150);
+        }, 120);
+
+        const overlay = new kakao.maps.CustomOverlay({
+          position: coords,
+          yAnchor: 1.8,
+          content: `
+            <div style="
+              background:#dc2626;
+              color:white;
+              padding:10px 12px;
+              border-radius:12px;
+              font-size:12px;
+              font-weight:800;
+              box-shadow:0 6px 18px rgba(0,0,0,0.22);
+              white-space:nowrap;
+              border:2px solid white;
+            ">
+              ${getAptName(selectedListing) || "선택 매물"}
+            </div>
+          `,
+        });
+
+        overlay.setMap(map);
+        selectionOverlayRef.current = overlay;
       } catch {}
     };
+
+    const savedCoords = coordsByIdRef.current.get(selectedListing.id);
+    if (savedCoords) {
+      showSelection(savedCoords);
+      return;
+    }
 
     const lat = getLat(selectedListing);
     const lng = getLng(selectedListing);
 
     if (lat !== null && lng !== null) {
-      moveTo(new kakao.maps.LatLng(lat, lng));
+      showSelection(new kakao.maps.LatLng(lat, lng));
       return;
     }
 
@@ -312,7 +333,8 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     places.keywordSearch(keyword, (result, searchStatus) => {
       if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
         const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
-        moveTo(coords);
+        coordsByIdRef.current.set(selectedListing.id, coords);
+        showSelection(coords);
       }
     });
   }, [selectedListing, status]);

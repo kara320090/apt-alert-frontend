@@ -379,16 +379,28 @@ export default function Home() {
 
                   {!loading &&
                     !error &&
-                    visibleListings.map((listing) => (
-                      <ListingCard
-                        key={listing.id}
-                        listing={listing}
-                        aiEnabled={filters.aiEnabled}
-                        mapMode="panel"
-                        onOpenMap={(item) => setSelectedListing(item)}
-                        isSelected={resolvedSelectedListing?.id === listing.id}
-                      />
-                    ))}
+                    visibleListings.map((listing) => {
+                      const selected = resolvedSelectedListing?.id === listing.id;
+
+                      return (
+                        <div
+                          key={listing.id}
+                          onClick={() => setSelectedListing(listing)}
+                          className={`w-full rounded-2xl transition-all duration-200 cursor-pointer ${
+                            selected
+                              ? "ring-2 ring-red-500 shadow-lg scale-[1.01] bg-red-50/30"
+                              : "hover:shadow-md"
+                          }`}
+                        >
+                          <ListingCard
+                            listing={listing}
+                            aiEnabled={filters.aiEnabled}
+                            mapMode="panel"
+                            isSelected={selected}
+                          />
+                        </div>
+                      );
+                    })}
 
                   {!loading && !error && (
                     <Pagination
