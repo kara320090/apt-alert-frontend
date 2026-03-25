@@ -3,8 +3,82 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const KAKAO_MAP_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
+const COORDS_CACHE_KEY = "apt-alert-coords-cache-v3";
 
-// 브라우저 전역에 SDK 로딩 Promise를 1번만 저장
+function readCoordsCache() {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(COORDS_CACHE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeCoordsCache(cache) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(COORDS_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+}
+
+function getAptName(item) {
+  return item?.apt_name || item?.properties?.apt_name || "";
+}
+
+function getDongName(item) {
+  return item?.dong_name || item?.region_name || item?.properties?.dong || "";
+}
+
+function getLat(item) {
+  const v = item?.lat ?? item?.properties?.lat;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getLng(item) {
+  const v = item?.lng ?? item?.properties?.lng;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function makeCoordsCacheKey(item) {
+  return `${getDongName(item)}|${getAptName(item)}`.trim();
+}
+
+function makeMarkerImage(fill, size = 18) {
+  if (typeof window === "undefined" || !window.kakao?.maps?.Size) return null;
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7" fill="${fill}" stroke="#ffffff" stroke-width="3" />
+    </svg>
+  `.trim();
+
+  const encoded = encodeURIComponent(svg)
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+
+  return new window.kakao.maps.MarkerImage(
+    `data:image/svg+xml;charset=UTF-8,${encoded}`,
+    new window.kakao.maps.Size(size, size)
+  );
+}
+
+function updateMarkerSelection(markerByIdRef, selectedId) {
+  if (typeof window === "undefined" || !window.kakao?.maps) return;
+
+  const normalImage = makeMarkerImage("#334155", 18);
+  const selectedImage = makeMarkerImage("#dc2626", 26);
+
+  markerByIdRef.current.forEach((marker, id) => {
+    try {
+      marker.setImage(id === selectedId ? selectedImage : normalImage);
+      marker.setZIndex(id === selectedId ? 10 : 1);
+    } catch {}
+  });
+}
+
 function loadKakaoSdk() {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("window is undefined"));
@@ -76,27 +150,22 @@ function loadKakaoSdk() {
   return window.__kakaoSdkPromise;
 }
 
-function getAptName(item) {
-  return item?.apt_name || item?.properties?.apt_name || "";
+
+function formatPriceText(value) {
+  const price = Number(value || 0);
+  const uk = Math.floor(price / 10000);
+  const man = price % 10000;
+  if (uk > 0 && man > 0) return `${uk}억 ${man.toLocaleString()}`;
+  if (uk > 0) return `${uk}억`;
+  return `${price.toLocaleString()}만`;
 }
 
-function getDongName(item) {
-  return item?.dong_name || item?.region_name || item?.properties?.dong || "";
+function getDiscountAmount(item) {
+  return Math.max(0, Number(item?.market_avg || 0) - Number(item?.price || 0));
 }
 
-function getLat(item) {
-  const v = item?.lat ?? item?.properties?.lat;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function getLng(item) {
-  const v = item?.lng ?? item?.properties?.lng;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-export default function KakaoMap({ listings = [], selectedId = null }) {
+export default function KakaoMap({ listings = [], selectedId = null, onSelectListing, selectedListing }) {
+  const rootRef = useRef(null);
   const mapElRef = useRef(null);
   const roadviewElRef = useRef(null);
 
@@ -105,22 +174,24 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
   const roadviewClientRef = useRef(null);
 
   const markersRef = useRef([]);
+  const markerByIdRef = useRef(new Map());
   const selectionOverlayRef = useRef(null);
+  const pulseOverlayRef = useRef(null);
   const coordsByIdRef = useRef(new Map());
   const initializedRef = useRef(false);
 
-  const [status, setStatus] = useState("loading"); // loading | ready | error
+  const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [pointCount, setPointCount] = useState(0);
-  const [viewMode, setViewMode] = useState("split"); // map | roadview | split
-  const [roadviewMessage, setRoadviewMessage] = useState("매물을 선택하면 스트리트 뷰를 표시합니다.");
+  const [viewMode, setViewMode] = useState("split");
+  const [roadviewMessage, setRoadviewMessage] = useState("매물을 선택하면 스트리트뷰를 함께 보여드립니다.");
+  const [searchingCoords, setSearchingCoords] = useState(false);
 
-  const selectedListing = useMemo(
-    () => listings.find((item) => item.id === selectedId) || null,
-    [listings, selectedId]
+  const resolvedSelectedListing = useMemo(
+    () => selectedListing || listings.find((item) => item.id === selectedId) || null,
+    [listings, selectedId, selectedListing]
   );
 
-  // 1) SDK 로드 + 지도/로드뷰 1회 생성
   useEffect(() => {
     let cancelled = false;
 
@@ -173,7 +244,28 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     };
   }, []);
 
-  // 2) 목록이 바뀔 때만 전체 마커 갱신 + bounds
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (!rootRef.current) return;
+
+    const relayout = () => {
+      try {
+        mapRef.current?.relayout();
+      } catch {}
+      try {
+        roadviewRef.current?.relayout();
+      } catch {}
+    };
+
+    const observer = new ResizeObserver(() => {
+      setTimeout(relayout, 60);
+    });
+
+    observer.observe(rootRef.current);
+
+    return () => observer.disconnect();
+  }, [status]);
+
   useEffect(() => {
     if (status !== "ready") return;
     if (!window.kakao?.maps) return;
@@ -184,30 +276,41 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
+    markerByIdRef.current = new Map();
 
     if (selectionOverlayRef.current) {
       selectionOverlayRef.current.setMap(null);
       selectionOverlayRef.current = null;
     }
 
+    if (pulseOverlayRef.current) {
+      pulseOverlayRef.current.setMap(null);
+      pulseOverlayRef.current = null;
+    }
+
     coordsByIdRef.current = new Map();
 
     if (!listings.length) {
       setPointCount(0);
+      setSearchingCoords(false);
       return;
     }
 
     const bounds = new kakao.maps.LatLngBounds();
     const places = kakao.maps.services ? new kakao.maps.services.Places() : null;
+    const cache = readCoordsCache();
 
     let found = 0;
     let completed = 0;
+    let pendingSearches = 0;
 
     const finalize = () => {
       completed += 1;
+      setSearchingCoords(pendingSearches > 0);
 
       if (completed === listings.length) {
         setPointCount(found);
+        setSearchingCoords(false);
 
         if (found > 0) {
           try {
@@ -219,17 +322,25 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
             }, 80);
           } catch {}
         }
+
+        updateMarkerSelection(markerByIdRef, selectedId);
       }
     };
 
     const paintMarker = (listing, coords) => {
       const marker = new kakao.maps.Marker({
         position: coords,
+        image: makeMarkerImage("#334155", 18),
       });
 
       marker.setMap(map);
       markersRef.current.push(marker);
+      markerByIdRef.current.set(listing.id, marker);
       coordsByIdRef.current.set(listing.id, coords);
+
+      kakao.maps.event.addListener(marker, "click", () => {
+        onSelectListing?.(listing.id);
+      });
 
       bounds.extend(coords);
       found += 1;
@@ -241,6 +352,15 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
       if (lat !== null && lng !== null) {
         const coords = new kakao.maps.LatLng(lat, lng);
+        paintMarker(listing, coords);
+        finalize();
+        return;
+      }
+
+      const cacheKey = makeCoordsCacheKey(listing);
+      const cached = cache[cacheKey];
+      if (cached?.lat && cached?.lng) {
+        const coords = new kakao.maps.LatLng(cached.lat, cached.lng);
         paintMarker(listing, coords);
         finalize();
         return;
@@ -258,21 +378,37 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         return;
       }
 
+      pendingSearches += 1;
+      setSearchingCoords(true);
+
       places.keywordSearch(keyword, (result, searchStatus) => {
+        pendingSearches -= 1;
+
         if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
           const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
           paintMarker(listing, coords);
+
+          cache[cacheKey] = {
+            lat: Number(result[0].y),
+            lng: Number(result[0].x),
+          };
+          writeCoordsCache(cache);
         }
+
         finalize();
       });
     });
-  }, [listings, status]);
+  }, [listings, status, selectedId, onSelectListing]);
 
-  // 3) 선택한 매물로 지도 이동 + 확대 + 스트리트뷰 표시
   useEffect(() => {
     if (status !== "ready") return;
-    if (!selectedListing) {
-      setRoadviewMessage("매물을 선택하면 스트리트 뷰를 표시합니다.");
+    updateMarkerSelection(markerByIdRef, selectedId);
+  }, [selectedId, status]);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (!resolvedSelectedListing) {
+      setRoadviewMessage("매물을 선택하면 스트리트뷰를 함께 보여드립니다.");
       return;
     }
     if (!window.kakao?.maps) return;
@@ -286,6 +422,11 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
     if (selectionOverlayRef.current) {
       selectionOverlayRef.current.setMap(null);
       selectionOverlayRef.current = null;
+    }
+
+    if (pulseOverlayRef.current) {
+      pulseOverlayRef.current.setMap(null);
+      pulseOverlayRef.current = null;
     }
 
     const showSelection = (coords) => {
@@ -313,52 +454,68 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
               white-space:nowrap;
               border:2px solid white;
             ">
-              ${getAptName(selectedListing) || "선택 매물"}
+              ${getAptName(resolvedSelectedListing) || "선택 매물"}
             </div>
           `,
         });
 
         overlay.setMap(map);
         selectionOverlayRef.current = overlay;
+
+        const pulse = new kakao.maps.CustomOverlay({
+          position: coords,
+          yAnchor: 0.5,
+          content: `
+            <div style="
+              width:20px;
+              height:20px;
+              border-radius:9999px;
+              background:rgba(220,38,38,0.25);
+              box-shadow:0 0 0 0 rgba(220,38,38,0.35);
+              animation:pulse-marker 1.6s infinite;
+              border:2px solid rgba(220,38,38,0.5);
+            "></div>
+          `,
+        });
+
+        pulse.setMap(map);
+        pulseOverlayRef.current = pulse;
       } catch {}
 
-      // 공식 문서 방식: getNearestPanoId -> setPanoId
-      // 가까운 로드뷰가 없으면 null이 반환될 수 있음
       roadviewClient.getNearestPanoId(coords, 50, (panoId) => {
         if (panoId) {
           try {
             roadview.setPanoId(panoId, coords);
             setRoadviewMessage("");
           } catch {
-            setRoadviewMessage("스트리트 뷰를 표시하지 못했습니다.");
+            setRoadviewMessage("스트리트뷰를 표시하지 못했습니다.");
           }
           return;
         }
 
-        // 50m 내에 없으면 한 번 더 넓게 시도
         roadviewClient.getNearestPanoId(coords, 200, (fallbackPanoId) => {
           if (fallbackPanoId) {
             try {
               roadview.setPanoId(fallbackPanoId, coords);
-              setRoadviewMessage("");
+              setRoadviewMessage("가장 가까운 도로 기준 스트리트뷰를 보여드립니다.");
             } catch {
-              setRoadviewMessage("스트리트 뷰를 표시하지 못했습니다.");
+              setRoadviewMessage("스트리트뷰를 표시하지 못했습니다.");
             }
           } else {
-            setRoadviewMessage("선택한 매물 근처에 스트리트 뷰가 없습니다.");
+            setRoadviewMessage("선택한 매물 근처에 스트리트뷰가 없습니다. 지도로 위치를 확인해주세요.");
           }
         });
       });
     };
 
-    const savedCoords = coordsByIdRef.current.get(selectedListing.id);
+    const savedCoords = coordsByIdRef.current.get(resolvedSelectedListing.id);
     if (savedCoords) {
       showSelection(savedCoords);
       return;
     }
 
-    const lat = getLat(selectedListing);
-    const lng = getLng(selectedListing);
+    const lat = getLat(resolvedSelectedListing);
+    const lng = getLng(resolvedSelectedListing);
 
     if (lat !== null && lng !== null) {
       showSelection(new kakao.maps.LatLng(lat, lng));
@@ -367,24 +524,64 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
     if (!kakao.maps.services) return;
 
+    const cache = readCoordsCache();
+    const cacheKey = makeCoordsCacheKey(resolvedSelectedListing);
+    const cached = cache[cacheKey];
+
+    if (cached?.lat && cached?.lng) {
+      const coords = new kakao.maps.LatLng(cached.lat, cached.lng);
+      coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
+      showSelection(coords);
+      return;
+    }
+
     const places = new kakao.maps.services.Places();
-    const keyword = `${getDongName(selectedListing)} ${getAptName(selectedListing)}`.trim();
+    const keyword = `${getDongName(resolvedSelectedListing)} ${getAptName(resolvedSelectedListing)}`.trim();
 
     if (!keyword) {
       setRoadviewMessage("선택한 매물의 위치 키워드를 찾지 못했습니다.");
       return;
     }
 
+    setSearchingCoords(true);
+
     places.keywordSearch(keyword, (result, searchStatus) => {
+      setSearchingCoords(false);
+
       if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
         const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
-        coordsByIdRef.current.set(selectedListing.id, coords);
+        coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
+
+        cache[cacheKey] = {
+          lat: Number(result[0].y),
+          lng: Number(result[0].x),
+        };
+        writeCoordsCache(cache);
+
         showSelection(coords);
       } else {
         setRoadviewMessage("선택한 매물의 좌표를 찾지 못했습니다.");
       }
     });
-  }, [selectedListing, status]);
+  }, [resolvedSelectedListing, status]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const styleId = "pulse-marker-style";
+    if (document.getElementById(styleId)) return;
+
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.innerHTML = `
+      @keyframes pulse-marker {
+        0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(220,38,38,0.4); }
+        70% { transform: scale(1.35); box-shadow: 0 0 0 14px rgba(220,38,38,0); }
+        100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -401,8 +598,14 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
 
   const showNoPointOverlay = status === "ready" && listings.length > 0 && pointCount === 0;
 
+  const priceText = resolvedSelectedListing ? formatPriceText(resolvedSelectedListing.price) : "-";
+  const savingText = resolvedSelectedListing ? formatPriceText(getDiscountAmount(resolvedSelectedListing)) : "-";
+  const selectedTags = Array.isArray(resolvedSelectedListing?.ai_tags)
+    ? resolvedSelectedListing.ai_tags.slice(0, 3)
+    : [];
+
   return (
-    <div className="w-full h-full min-h-[520px] relative bg-slate-100 overflow-hidden">
+    <div ref={rootRef} className="w-full h-full min-h-[520px] relative bg-slate-100 overflow-hidden">
       {status === "loading" && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-20">
           <span className="text-slate-400 font-bold tracking-widest uppercase animate-pulse text-sm">
@@ -415,6 +618,83 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 z-20 px-6 text-center">
           <p className="text-red-500 font-semibold mb-2">지도를 불러오지 못했습니다.</p>
           <p className="text-sm text-slate-500 whitespace-pre-wrap">{error}</p>
+        </div>
+      )}
+
+      {showNoPointOverlay && viewMode !== "roadview" && (
+        <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
+          <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
+            지도에 표시할 좌표를 찾지 못했습니다.
+          </p>
+        </div>
+      )}
+
+      {searchingCoords && (
+        <div className="absolute left-6 bottom-6 z-30 pointer-events-none">
+          <div className="bg-white/90 border border-slate-200 rounded-xl px-4 py-2 shadow-md text-xs font-bold text-slate-600">
+            매물 좌표를 찾는 중...
+          </div>
+        </div>
+      )}
+
+      {resolvedSelectedListing && (
+        <div className="absolute top-6 left-6 z-30 max-w-[380px] bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-lg p-4">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-600">선택 매물</p>
+              <h3 className="text-base font-black text-slate-900 leading-tight mt-1">
+                {getAptName(resolvedSelectedListing) || "단지명 미상"}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {getDongName(resolvedSelectedListing)} · {resolvedSelectedListing.area_size || "-"}㎡ · {resolvedSelectedListing.floor || "-"}층
+              </p>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-black border bg-red-50 text-red-600 border-red-200 whitespace-nowrap">
+              -{resolvedSelectedListing.discount_rate || 0}%
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase">매매가</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{priceText}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase">절감액</p>
+              <p className="text-sm font-black text-red-600 mt-1">{savingText}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase">급매 등급</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{resolvedSelectedListing.grade || "일반"}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase">AI 상태</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{selectedTags.length > 0 ? "분석 완료" : "기본 분석"}</p>
+            </div>
+          </div>
+
+          {resolvedSelectedListing.ai_summary && (
+            <div className="mt-3 rounded-xl bg-blue-50 border border-blue-100 px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-600">AI 요약</p>
+              <p className="text-xs text-slate-700 mt-1 leading-5 line-clamp-2">{resolvedSelectedListing.ai_summary}</p>
+            </div>
+          )}
+
+          {selectedTags.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {selectedTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-white border border-blue-100 text-blue-600 shadow-sm"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -444,14 +724,6 @@ export default function KakaoMap({ listings = [], selectedId = null }) {
           스트리트뷰
         </button>
       </div>
-
-      {showNoPointOverlay && viewMode !== "roadview" && (
-        <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
-          <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
-            지도에 표시할 좌표를 찾지 못했습니다.
-          </p>
-        </div>
-      )}
 
       {viewMode === "map" && (
         <div ref={mapElRef} className="w-full h-full absolute inset-0" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { dummyListings, regions as fallbackRegions } from "../data/dummy";
 import { enrichListings, applyFilter } from "../lib/filter";
 import { enrichWithPriceAiOnly } from "../lib/aiSummary";
@@ -13,6 +13,7 @@ import TopTabs from "../components/TopTabs";
 import RegionReport from "../components/RegionReport";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 
 function mapItem(item) {
   const properties = item?.properties || {};
@@ -46,6 +47,8 @@ function mapItem(item) {
     grade: item?.grade || "일반",
     lat: item?.lat ?? null,
     lng: item?.lng ?? null,
+    ai_tags: item?.ai_tags || [],
+    ai_summary: item?.ai_summary || "",
   };
 }
 
@@ -105,6 +108,15 @@ function Pagination({ currentPage, totalPages, onChange }) {
   );
 }
 
+function buildFilterSummary(filters) {
+  return [
+    filters.region === "전체" ? "전지역" : filters.region,
+    filters.grade === "전체" ? "전체등급" : filters.grade,
+    `할인 ${filters.minDiscount}%+`,
+    filters.aiEnabled ? "AI ON" : "AI OFF",
+  ];
+}
+
 export default function Home() {
   const [regions, setRegions] = useState(fallbackRegions);
   const [rawListings, setRawListings] = useState([]);
@@ -120,6 +132,9 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState("list");
   const [selectedListing, setSelectedListing] = useState(null);
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
 
   const [filters, setFilters] = useState({
     region: "전체",
@@ -129,6 +144,39 @@ export default function Home() {
   });
 
   const resolvedSelectedListing = selectedListing || visibleListings[0] || null;
+  const filterSummary = useMemo(() => buildFilterSummary(filters), [filters]);
+  const desktopCollapsed = !isMobile && leftPanelCollapsed;
+  const showPanelContent = isMobile ? mobilePanelOpen : !desktopCollapsed;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem(LEFT_PANEL_STORAGE_KEY);
+      if (saved === "1") setLeftPanelCollapsed(true);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(LEFT_PANEL_STORAGE_KEY, leftPanelCollapsed ? "1" : "0");
+    } catch {}
+  }, [leftPanelCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const media = window.matchMedia("(max-width: 767px)");
+    const sync = (event) => {
+      const mobile = event.matches;
+      setIsMobile(mobile);
+      if (!mobile) setMobilePanelOpen(false);
+    };
+
+    setIsMobile(media.matches);
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -281,7 +329,14 @@ export default function Home() {
     });
   }, [visibleListings]);
 
-  function handleFilterSubmit(nextFilters) {
+  useEffect(() => {
+    if (!resolvedSelectedListing?.id || activeTab !== "list") return;
+    const el = document.getElementById(`listing-card-${resolvedSelectedListing.id}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [resolvedSelectedListing?.id, activeTab]);
+
+  const handleFilterSubmit = useCallback((nextFilters) => {
     setFilters({
       region: nextFilters.region,
       grade: nextFilters.grade,
@@ -289,139 +344,262 @@ export default function Home() {
       aiEnabled: nextFilters.aiEnabled,
     });
     setPage(1);
-  }
+    if (isMobile) setMobilePanelOpen(false);
+  }, [isMobile]);
 
-  function handlePageChange(nextPage) {
+  const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
-  }
+  }, []);
+
+  const handleMapSelect = useCallback(
+    (listingId) => {
+      const found = visibleListings.find((item) => item.id === listingId);
+      if (found) {
+        setSelectedListing(found);
+        if (isMobile) setMobilePanelOpen(false);
+      }
+    },
+    [visibleListings, isMobile]
+  );
+
+  const toggleLeftPanel = useCallback(() => {
+    if (isMobile) {
+      setMobilePanelOpen((prev) => !prev);
+      return;
+    }
+    setLeftPanelCollapsed((prev) => !prev);
+  }, [isMobile]);
+
+  const closeMobilePanel = useCallback(() => setMobilePanelOpen(false), []);
+
+  const panelClasses = isMobile
+    ? `absolute inset-y-0 left-0 z-40 w-[88vw] max-w-[420px] bg-white border-r border-gray-200 shadow-2xl transform transition-transform duration-300 ${mobilePanelOpen ? "translate-x-0" : "-translate-x-full"}`
+    : `h-full flex flex-col border-r border-gray-200 z-10 shadow-2xl relative bg-white transition-[width,min-width,max-width] duration-300 ease-out ${desktopCollapsed ? "w-[92px] min-w-[92px] max-w-[92px]" : "w-full md:w-[34%] lg:w-[30%] min-w-[320px] max-w-[420px]"}`;
 
   return (
-    <main className="h-screen w-full flex overflow-hidden bg-white text-gray-900">
-      <div className="w-full md:w-[34%] lg:w-[30%] min-w-[320px] max-w-[420px] h-full flex flex-col border-r border-gray-200 z-10 shadow-2xl relative bg-white">
-        <header className="px-10 py-6 border-b border-gray-100 bg-white shrink-0 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-black text-red-600 tracking-tight">🚨 급매물 알리미</h1>
-            <p className="text-xs font-bold text-gray-500 mt-1 uppercase tracking-wider">
-              실거래가 기반 초급매 감지 레이더
-            </p>
-          </div>
+    <main className="h-screen w-full flex overflow-hidden bg-white text-gray-900 relative">
+      {isMobile && mobilePanelOpen && (
+        <button
+          aria-label="메뉴 닫기"
+          onClick={closeMobilePanel}
+          className="absolute inset-0 z-30 bg-black/30 backdrop-blur-[1px]"
+        />
+      )}
 
-          <div className="flex items-center gap-3">
-            <span
-              className={`text-[11px] font-black px-3 py-1.5 rounded-full border ${
-                filters.aiEnabled
-                  ? "bg-blue-50 text-blue-700 border-blue-200"
-                  : "bg-gray-50 text-gray-500 border-gray-200"
-              }`}
-            >
-              AI {filters.aiEnabled ? "ON" : "OFF"}
-            </span>
-            <span className="flex h-3 w-3 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
-            </span>
-          </div>
-        </header>
-
-        <div className="feed-scroll flex-1 overflow-y-auto w-full bg-slate-50 scroll-smooth shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]">
-          <div className="max-w-2xl mx-auto w-full px-6 py-8">
-            <TopTabs activeTab={activeTab} onChange={setActiveTab} />
-
-            {activeTab === "list" ? (
-              <>
-                <FilterBar
-                  initialValue={filters}
-                  onFilter={handleFilterSubmit}
-                  regions={regions}
-                />
-
-                <div className="flex items-center justify-between mb-4 mt-2">
-                  <p className="text-sm font-bold text-gray-800">
-                    {!loading ? (
-                      <>
-                        총 <span className="text-red-600">{total.toLocaleString()}</span>건의 급매물
-                      </>
-                    ) : (
-                      "급매물 탐색 중"
-                    )}
-                  </p>
-
-                  <div className="flex items-center gap-3">
-                    {filters.aiEnabled && aiLoading && (
-                      <p className="text-xs text-blue-500 font-bold">AI 입지 해석 중...</p>
-                    )}
-                    {!loading && totalPages > 1 && (
-                      <p className="text-xs text-gray-400 font-bold">
-                        {page} / {totalPages} 페이지
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  <EmailForm regions={regions} />
-
-                  {loading && (
-                    <div className="py-10 text-center text-sm font-bold text-gray-400 animate-pulse">
-                      레이더 가동 중...
-                    </div>
-                  )}
-
-                  {error && (
-                    <div className="py-10 text-center text-sm font-bold text-red-400">{error}</div>
-                  )}
-
-                  {!loading && !error && visibleListings.length === 0 && (
-                    <div className="py-10 text-center text-sm font-bold text-gray-400">
-                      조건에 맞는 급매물이 없습니다.
-                    </div>
-                  )}
-
-                  {!loading &&
-                    !error &&
-                    visibleListings.map((listing) => {
-                      const selected = resolvedSelectedListing?.id === listing.id;
-
-                      return (
-                        <div
-                          key={listing.id}
-                          onClick={() => setSelectedListing(listing)}
-                          className={`w-full rounded-2xl cursor-pointer transition-all duration-200 ${
-                            selected
-                              ? "ring-2 ring-red-500 shadow-lg scale-[1.01] bg-red-50/30"
-                              : "hover:shadow-md"
-                          }`}
-                        >
-                          <ListingCard
-                            listing={listing}
-                            aiEnabled={filters.aiEnabled}
-                            mapMode="panel"
-                            onOpenMap={(item) => setSelectedListing(item)}
-                            isSelected={selected}
-                          />
-                        </div>
-                      );
-                    })}
-
-                  {!loading && !error && (
-                    <Pagination
-                      currentPage={page}
-                      totalPages={totalPages}
-                      onChange={handlePageChange}
-                    />
-                  )}
-                </div>
-              </>
-            ) : (
-              <RegionReport
-                listings={visibleListings}
-                aiEnabled={filters.aiEnabled}
-                regions={regions}
-                selectedRegion={filters.region}
-              />
-            )}
+      {isMobile && !mobilePanelOpen && (
+        <div className="absolute top-4 left-4 z-30 flex flex-col gap-2">
+          <button
+            onClick={toggleLeftPanel}
+            className="w-11 h-11 rounded-2xl bg-white border border-slate-200 shadow-lg text-slate-700 hover:bg-slate-50 transition"
+            aria-label="필터 및 목록 열기"
+            title="필터 및 목록 열기"
+          >
+            ≡
+          </button>
+          <div className="bg-white/90 border border-slate-200 rounded-2xl shadow-lg px-3 py-2 backdrop-blur text-[11px] font-bold text-slate-600 max-w-[180px]">
+            <div className="text-[10px] text-slate-400 font-black uppercase mb-1">현재 필터</div>
+            <div className="flex flex-wrap gap-1.5">
+              {filterSummary.slice(0, 3).map((item) => (
+                <span key={item} className="px-2 py-1 rounded-full bg-slate-100 text-slate-600">
+                  {item}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
+      )}
+
+      <div className={panelClasses}>
+        <header className={`border-b border-gray-100 bg-white shrink-0 flex items-center justify-between transition-all duration-300 ${desktopCollapsed ? "px-3 py-4" : "px-8 py-5"}`}>
+          {desktopCollapsed ? (
+            <div className="w-full flex flex-col items-center gap-3">
+              <button
+                onClick={toggleLeftPanel}
+                className="w-11 h-11 rounded-2xl bg-red-600 text-white shadow-md hover:bg-red-700 transition"
+                aria-label="왼쪽 메뉴 열기"
+                title="왼쪽 메뉴 열기"
+              >
+                ≡
+              </button>
+
+              <div className="flex flex-col items-center gap-2 mt-2">
+                <button
+                  onClick={() => {
+                    setActiveTab("list");
+                    setLeftPanelCollapsed(false);
+                  }}
+                  className={`w-11 h-11 rounded-xl text-sm font-black border transition ${
+                    activeTab === "list"
+                      ? "bg-red-50 text-red-600 border-red-200"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+                  }`}
+                  title="목록"
+                >
+                  목
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab("report");
+                    setLeftPanelCollapsed(false);
+                  }}
+                  className={`w-11 h-11 rounded-xl text-sm font-black border transition ${
+                    activeTab === "report"
+                      ? "bg-blue-50 text-blue-600 border-blue-200"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+                  }`}
+                  title="리포트"
+                >
+                  리
+                </button>
+              </div>
+
+              <div className="mt-2 flex flex-col items-center gap-2 w-full">
+                <div className="text-[10px] font-black text-slate-400 tracking-wider">건수</div>
+                <div className="text-sm font-black text-red-600">{total}</div>
+                <div className="w-full flex flex-col gap-1.5 mt-1">
+                  {filterSummary.map((item) => (
+                    <div key={item} className="mx-auto max-w-[74px] text-center text-[10px] font-bold text-slate-600 bg-slate-100 rounded-full px-2 py-1 leading-tight break-keep">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div>
+                <h1 className="text-xl font-black text-red-600 tracking-tight">🚨 급매물 알리미</h1>
+                <p className="text-[11px] font-bold text-gray-500 mt-1 uppercase tracking-wider">
+                  실거래가 기반 초급매 감지 레이더
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={toggleLeftPanel}
+                  className="w-10 h-10 rounded-2xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition"
+                  aria-label={isMobile ? "왼쪽 메뉴 닫기" : "왼쪽 메뉴 접기"}
+                  title={isMobile ? "왼쪽 메뉴 닫기" : "왼쪽 메뉴 접기"}
+                >
+                  {isMobile ? "✕" : "←"}
+                </button>
+                <span
+                  className={`text-[10px] font-black px-3 py-1.5 rounded-full border ${
+                    filters.aiEnabled
+                      ? "bg-blue-50 text-blue-700 border-blue-200"
+                      : "bg-gray-50 text-gray-500 border-gray-200"
+                  }`}
+                >
+                  AI {filters.aiEnabled ? "ON" : "OFF"}
+                </span>
+                <span className="flex h-3 w-3 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+                </span>
+              </div>
+            </>
+          )}
+        </header>
+
+        {showPanelContent && (
+          <div className="feed-scroll flex-1 overflow-y-auto w-full bg-slate-50 scroll-smooth shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]">
+            <div className="max-w-2xl mx-auto w-full px-5 py-6">
+              <TopTabs activeTab={activeTab} onChange={setActiveTab} />
+
+              {activeTab === "list" ? (
+                <>
+                  <FilterBar
+                    initialValue={filters}
+                    onFilter={handleFilterSubmit}
+                    regions={regions}
+                  />
+
+                  <div className="flex items-center justify-between mb-4 mt-2">
+                    <p className="text-sm font-bold text-gray-800">
+                      {!loading ? (
+                        <>
+                          총 <span className="text-red-600">{total.toLocaleString()}</span>건의 급매물
+                        </>
+                      ) : (
+                        "급매물 탐색 중"
+                      )}
+                    </p>
+
+                    <div className="flex items-center gap-3">
+                      {filters.aiEnabled && aiLoading && (
+                        <p className="text-xs text-blue-500 font-bold">AI 입지 해석 중...</p>
+                      )}
+                      {!loading && totalPages > 1 && (
+                        <p className="text-xs text-gray-400 font-bold">
+                          {page} / {totalPages} 페이지
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-4">
+                    <EmailForm regions={regions} />
+
+                    {loading && (
+                      <div className="py-10 text-center text-sm font-bold text-gray-400 animate-pulse">
+                        레이더 가동 중...
+                      </div>
+                    )}
+
+                    {error && (
+                      <div className="py-10 text-center text-sm font-bold text-red-400">{error}</div>
+                    )}
+
+                    {!loading && !error && visibleListings.length === 0 && (
+                      <div className="py-10 text-center text-sm font-bold text-gray-400">
+                        조건에 맞는 급매물이 없습니다.
+                      </div>
+                    )}
+
+                    {!loading &&
+                      !error &&
+                      visibleListings.map((listing) => {
+                        const selected = resolvedSelectedListing?.id === listing.id;
+
+                        return (
+                          <div
+                            key={listing.id}
+                            id={`listing-card-${listing.id}`}
+                            onClick={() => {
+                              setSelectedListing(listing);
+                              if (isMobile) setMobilePanelOpen(false);
+                            }}
+                            className={`w-full rounded-2xl cursor-pointer transition-all duration-200 ${
+                              selected
+                                ? "ring-2 ring-red-500 shadow-lg scale-[1.01] bg-red-50/30"
+                                : "hover:shadow-md"
+                            }`}
+                          >
+                            <ListingCard listing={listing} isSelected={selected} />
+                          </div>
+                        );
+                      })}
+
+                    {!loading && !error && (
+                      <Pagination
+                        currentPage={page}
+                        totalPages={totalPages}
+                        onChange={handlePageChange}
+                      />
+                    )}
+                  </div>
+                </>
+              ) : (
+                <RegionReport
+                  listings={visibleListings}
+                  aiEnabled={filters.aiEnabled}
+                  regions={regions}
+                  selectedRegion={filters.region}
+                />
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 h-full bg-gray-100 relative">
@@ -429,6 +607,8 @@ export default function Home() {
           <KakaoMap
             listings={visibleListings}
             selectedId={resolvedSelectedListing?.id ?? null}
+            selectedListing={resolvedSelectedListing}
+            onSelectListing={handleMapSelect}
           />
         ) : (
           <div className="h-full flex items-center justify-center text-sm font-bold text-gray-400">
