@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const KAKAO_MAP_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
-const COORDS_CACHE_KEY = "apt-alert-coords-cache-v3";
+const COORDS_CACHE_KEY = "apt-alert-coords-cache-v4";
 
 function readCoordsCache() {
   if (typeof window === "undefined") return {};
@@ -43,6 +43,19 @@ function getLng(item) {
 
 function makeCoordsCacheKey(item) {
   return `${getDongName(item)}|${getAptName(item)}`.trim();
+}
+
+function formatPriceText(value) {
+  const price = Number(value || 0);
+  const uk = Math.floor(price / 10000);
+  const man = price % 10000;
+  if (uk > 0 && man > 0) return `${uk}억 ${man.toLocaleString()}만`;
+  if (uk > 0) return `${uk}억`;
+  return `${price.toLocaleString()}만`;
+}
+
+function getDiscountAmount(item) {
+  return Math.max(0, Number(item?.market_avg || 0) - Number(item?.price || 0));
 }
 
 function makeMarkerImage(fill, size = 18) {
@@ -150,24 +163,10 @@ function loadKakaoSdk() {
   return window.__kakaoSdkPromise;
 }
 
-
-function formatPriceText(value) {
-  const price = Number(value || 0);
-  const uk = Math.floor(price / 10000);
-  const man = price % 10000;
-  if (uk > 0 && man > 0) return `${uk}억 ${man.toLocaleString()}`;
-  if (uk > 0) return `${uk}억`;
-  return `${price.toLocaleString()}만`;
-}
-
-function getDiscountAmount(item) {
-  return Math.max(0, Number(item?.market_avg || 0) - Number(item?.price || 0));
-}
-
 export default function KakaoMap({ listings = [], selectedId = null, onSelectListing, selectedListing }) {
   const rootRef = useRef(null);
-  const mapElRef = useRef(null);
-  const roadviewElRef = useRef(null);
+  const mapPaneRef = useRef(null);
+  const roadPaneRef = useRef(null);
 
   const mapRef = useRef(null);
   const roadviewRef = useRef(null);
@@ -179,6 +178,7 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
   const pulseOverlayRef = useRef(null);
   const coordsByIdRef = useRef(new Map());
   const initializedRef = useRef(false);
+  const selectedIdRef = useRef(selectedId);
 
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
@@ -193,6 +193,10 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
   );
 
   useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function init() {
@@ -200,35 +204,25 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         const kakao = await loadKakaoSdk();
         if (cancelled) return;
 
-        if (!mapElRef.current || !roadviewElRef.current) {
+        if (!mapPaneRef.current || !roadPaneRef.current) {
           throw new Error("지도 또는 로드뷰 DOM을 찾지 못했습니다.");
         }
 
         if (!initializedRef.current) {
           const center = new kakao.maps.LatLng(37.5665, 126.9780);
 
-          mapRef.current = new kakao.maps.Map(mapElRef.current, {
+          mapRef.current = new kakao.maps.Map(mapPaneRef.current, {
             center,
             level: 6,
           });
 
-          roadviewRef.current = new kakao.maps.Roadview(roadviewElRef.current);
+          roadviewRef.current = new kakao.maps.Roadview(roadPaneRef.current);
           roadviewClientRef.current = new kakao.maps.RoadviewClient();
-
           initializedRef.current = true;
         }
 
         setStatus("ready");
         setError("");
-
-        setTimeout(() => {
-          try {
-            mapRef.current?.relayout();
-          } catch {}
-          try {
-            roadviewRef.current?.relayout();
-          } catch {}
-        }, 80);
       } catch (err) {
         if (!cancelled) {
           setStatus("error");
@@ -238,7 +232,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     }
 
     init();
-
     return () => {
       cancelled = true;
     };
@@ -258,14 +251,16 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     };
 
     const observer = new ResizeObserver(() => {
-      setTimeout(relayout, 60);
+      setTimeout(relayout, 80);
     });
 
     observer.observe(rootRef.current);
+    setTimeout(relayout, 80);
 
     return () => observer.disconnect();
-  }, [status]);
+  }, [status, viewMode]);
 
+  // Marker drawing only when listing set changes
   useEffect(() => {
     if (status !== "ready") return;
     if (!window.kakao?.maps) return;
@@ -277,16 +272,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
     markerByIdRef.current = new Map();
-
-    if (selectionOverlayRef.current) {
-      selectionOverlayRef.current.setMap(null);
-      selectionOverlayRef.current = null;
-    }
-
-    if (pulseOverlayRef.current) {
-      pulseOverlayRef.current.setMap(null);
-      pulseOverlayRef.current = null;
-    }
 
     coordsByIdRef.current = new Map();
 
@@ -304,6 +289,19 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     let completed = 0;
     let pendingSearches = 0;
 
+    const maybeFitBounds = () => {
+      if (found > 0 && !selectedIdRef.current) {
+        try {
+          map.setBounds(bounds);
+          setTimeout(() => {
+            try {
+              map.relayout();
+            } catch {}
+          }, 80);
+        } catch {}
+      }
+    };
+
     const finalize = () => {
       completed += 1;
       setSearchingCoords(pendingSearches > 0);
@@ -311,19 +309,8 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       if (completed === listings.length) {
         setPointCount(found);
         setSearchingCoords(false);
-
-        if (found > 0) {
-          try {
-            map.setBounds(bounds);
-            setTimeout(() => {
-              try {
-                map.relayout();
-              } catch {}
-            }, 80);
-          } catch {}
-        }
-
-        updateMarkerSelection(markerByIdRef, selectedId);
+        maybeFitBounds();
+        updateMarkerSelection(markerByIdRef, selectedIdRef.current);
       }
     };
 
@@ -372,7 +359,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       }
 
       const keyword = `${getDongName(listing)} ${getAptName(listing)}`.trim();
-
       if (!keyword) {
         finalize();
         return;
@@ -383,22 +369,19 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
 
       places.keywordSearch(keyword, (result, searchStatus) => {
         pendingSearches -= 1;
-
         if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
           const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
           paintMarker(listing, coords);
-
           cache[cacheKey] = {
             lat: Number(result[0].y),
             lng: Number(result[0].x),
           };
           writeCoordsCache(cache);
         }
-
         finalize();
       });
     });
-  }, [listings, status, selectedId, onSelectListing]);
+  }, [listings, status, onSelectListing]);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -407,10 +390,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
 
   useEffect(() => {
     if (status !== "ready") return;
-    if (!resolvedSelectedListing) {
-      setRoadviewMessage("매물을 선택하면 스트리트뷰를 함께 보여드립니다.");
-      return;
-    }
     if (!window.kakao?.maps) return;
     if (!mapRef.current || !roadviewRef.current || !roadviewClientRef.current) return;
 
@@ -423,21 +402,24 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       selectionOverlayRef.current.setMap(null);
       selectionOverlayRef.current = null;
     }
-
     if (pulseOverlayRef.current) {
       pulseOverlayRef.current.setMap(null);
       pulseOverlayRef.current = null;
     }
 
+    if (!resolvedSelectedListing) {
+      setRoadviewMessage("매물을 선택하면 스트리트뷰를 함께 보여드립니다.");
+      return;
+    }
+
     const showSelection = (coords) => {
       try {
         map.panTo(coords);
-
         setTimeout(() => {
           try {
             map.setLevel(2);
           } catch {}
-        }, 120);
+        }, 180);
 
         const overlay = new kakao.maps.CustomOverlay({
           position: coords,
@@ -458,7 +440,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
             </div>
           `,
         });
-
         overlay.setMap(map);
         selectionOverlayRef.current = overlay;
 
@@ -477,7 +458,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
             "></div>
           `,
         });
-
         pulse.setMap(map);
         pulseOverlayRef.current = pulse;
       } catch {}
@@ -516,7 +496,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
 
     const lat = getLat(resolvedSelectedListing);
     const lng = getLng(resolvedSelectedListing);
-
     if (lat !== null && lng !== null) {
       showSelection(new kakao.maps.LatLng(lat, lng));
       return;
@@ -527,7 +506,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     const cache = readCoordsCache();
     const cacheKey = makeCoordsCacheKey(resolvedSelectedListing);
     const cached = cache[cacheKey];
-
     if (cached?.lat && cached?.lng) {
       const coords = new kakao.maps.LatLng(cached.lat, cached.lng);
       coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
@@ -537,27 +515,19 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
 
     const places = new kakao.maps.services.Places();
     const keyword = `${getDongName(resolvedSelectedListing)} ${getAptName(resolvedSelectedListing)}`.trim();
-
     if (!keyword) {
       setRoadviewMessage("선택한 매물의 위치 키워드를 찾지 못했습니다.");
       return;
     }
 
     setSearchingCoords(true);
-
     places.keywordSearch(keyword, (result, searchStatus) => {
       setSearchingCoords(false);
-
       if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
         const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
         coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
-
-        cache[cacheKey] = {
-          lat: Number(result[0].y),
-          lng: Number(result[0].x),
-        };
+        cache[cacheKey] = { lat: Number(result[0].y), lng: Number(result[0].x) };
         writeCoordsCache(cache);
-
         showSelection(coords);
       } else {
         setRoadviewMessage("선택한 매물의 좌표를 찾지 못했습니다.");
@@ -567,10 +537,8 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-
     const styleId = "pulse-marker-style";
     if (document.getElementById(styleId)) return;
-
     const style = document.createElement("style");
     style.id = styleId;
     style.innerHTML = `
@@ -583,26 +551,7 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     document.head.appendChild(style);
   }, []);
 
-  useEffect(() => {
-    if (status !== "ready") return;
-
-    setTimeout(() => {
-      try {
-        mapRef.current?.relayout();
-      } catch {}
-      try {
-        roadviewRef.current?.relayout();
-      } catch {}
-    }, 100);
-  }, [viewMode, status]);
-
   const showNoPointOverlay = status === "ready" && listings.length > 0 && pointCount === 0;
-
-  const priceText = resolvedSelectedListing ? formatPriceText(resolvedSelectedListing.price) : "-";
-  const savingText = resolvedSelectedListing ? formatPriceText(getDiscountAmount(resolvedSelectedListing)) : "-";
-  const selectedTags = Array.isArray(resolvedSelectedListing?.ai_tags)
-    ? resolvedSelectedListing.ai_tags.slice(0, 3)
-    : [];
 
   return (
     <div ref={rootRef} className="w-full h-full min-h-[520px] relative bg-slate-100 overflow-hidden">
@@ -621,14 +570,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         </div>
       )}
 
-      {showNoPointOverlay && viewMode !== "roadview" && (
-        <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
-          <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
-            지도에 표시할 좌표를 찾지 못했습니다.
-          </p>
-        </div>
-      )}
-
       {searchingCoords && (
         <div className="absolute left-6 bottom-6 z-30 pointer-events-none">
           <div className="bg-white/90 border border-slate-200 rounded-xl px-4 py-2 shadow-md text-xs font-bold text-slate-600">
@@ -637,64 +578,32 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         </div>
       )}
 
-      {resolvedSelectedListing && (
-        <div className="absolute top-6 left-6 z-30 max-w-[380px] bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-lg p-4">
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-600">선택 매물</p>
-              <h3 className="text-base font-black text-slate-900 leading-tight mt-1">
-                {getAptName(resolvedSelectedListing) || "단지명 미상"}
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                {getDongName(resolvedSelectedListing)} · {resolvedSelectedListing.area_size || "-"}㎡ · {resolvedSelectedListing.floor || "-"}층
-              </p>
-            </div>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-black border bg-red-50 text-red-600 border-red-200 whitespace-nowrap">
-              -{resolvedSelectedListing.discount_rate || 0}%
-            </span>
+      {resolvedSelectedListing && status === "ready" && (
+        <div className="absolute top-6 left-6 z-30 bg-white/92 backdrop-blur border border-slate-200 rounded-2xl shadow-xl px-4 py-3 min-w-[260px] max-w-[320px]">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">선택 매물</div>
+          <div className="text-sm font-black text-slate-900 break-keep">{getAptName(resolvedSelectedListing) || "이름 없음"}</div>
+          <div className="text-xs text-slate-500 font-semibold mt-1 break-keep">
+            {getDongName(resolvedSelectedListing) || "지역 정보 없음"}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] font-bold text-slate-400 uppercase">매매가</p>
-              <p className="text-sm font-black text-slate-900 mt-1">{priceText}</p>
+          <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">매매가</div>
+              <div className="text-slate-900 font-black mt-1">{formatPriceText(resolvedSelectedListing?.price)}</div>
             </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] font-bold text-slate-400 uppercase">절감액</p>
-              <p className="text-sm font-black text-red-600 mt-1">{savingText}</p>
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">절감액</div>
+              <div className="text-red-600 font-black mt-1">{formatPriceText(getDiscountAmount(resolvedSelectedListing))}</div>
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] font-bold text-slate-400 uppercase">급매 등급</p>
-              <p className="text-sm font-black text-slate-900 mt-1">{resolvedSelectedListing.grade || "일반"}</p>
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">면적</div>
+              <div className="text-slate-900 font-black mt-1">{resolvedSelectedListing?.area_size || "-"}㎡</div>
             </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] font-bold text-slate-400 uppercase">AI 상태</p>
-              <p className="text-sm font-black text-slate-900 mt-1">{selectedTags.length > 0 ? "분석 완료" : "기본 분석"}</p>
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">층수</div>
+              <div className="text-slate-900 font-black mt-1">{resolvedSelectedListing?.floor || "-"}층</div>
             </div>
           </div>
-
-          {resolvedSelectedListing.ai_summary && (
-            <div className="mt-3 rounded-xl bg-blue-50 border border-blue-100 px-3 py-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-600">AI 요약</p>
-              <p className="text-xs text-slate-700 mt-1 leading-5 line-clamp-2">{resolvedSelectedListing.ai_summary}</p>
-            </div>
-          )}
-
-          {selectedTags.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {selectedTags.map((tag) => (
-                <span
-                  key={tag}
-                  className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-white border border-blue-100 text-blue-600 shadow-sm"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -725,47 +634,37 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         </button>
       </div>
 
-      {viewMode === "map" && (
-        <div ref={mapElRef} className="w-full h-full absolute inset-0" />
-      )}
+      <div className="absolute inset-0">
+        <div
+          className={`absolute inset-0 transition-all duration-300 ${
+            viewMode === "map" ? "w-full h-full opacity-100" : viewMode === "split" ? "w-1/2 h-full left-0 opacity-100" : "w-0 h-0 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div ref={mapPaneRef} className="w-full h-full" />
+          {showNoPointOverlay && viewMode !== "roadview" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
+              <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
+                지도에 표시할 좌표를 찾지 못했습니다.
+              </p>
+            </div>
+          )}
+        </div>
 
-      {viewMode === "roadview" && (
-        <div className="w-full h-full absolute inset-0">
-          <div ref={roadviewElRef} className="w-full h-full" />
-          {roadviewMessage && (
+        <div
+          className={`absolute inset-y-0 right-0 transition-all duration-300 ${
+            viewMode === "roadview" ? "w-full h-full opacity-100" : viewMode === "split" ? "w-1/2 h-full opacity-100" : "w-0 h-0 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div ref={roadPaneRef} className="w-full h-full" />
+          {roadviewMessage && (viewMode === "roadview" || viewMode === "split") && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg">
+              <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg text-center mx-6">
                 {roadviewMessage}
               </p>
             </div>
           )}
         </div>
-      )}
-
-      {viewMode === "split" && (
-        <div className="w-full h-full absolute inset-0 grid grid-cols-2">
-          <div className="relative border-r border-white/60">
-            <div ref={mapElRef} className="w-full h-full" />
-            {showNoPointOverlay && (
-              <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
-                <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
-                  지도에 표시할 좌표를 찾지 못했습니다.
-                </p>
-              </div>
-            )}
-          </div>
-          <div className="relative">
-            <div ref={roadviewElRef} className="w-full h-full" />
-            {roadviewMessage && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg">
-                  {roadviewMessage}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
