@@ -189,7 +189,9 @@ export default function Home() {
       try {
         const json = await fetchRegions();
         const names = Array.isArray(json?.data) ? json.data : [];
-        if (!ignore && names.length > 0) {
+        // Only replace fallback if API returns at least as many regions — prevents
+        // a stale/partial backend response from shrinking the dropdown
+        if (!ignore && names.length >= fallbackRegions.length) {
           setRegions(names);
         }
       } catch (err) {
