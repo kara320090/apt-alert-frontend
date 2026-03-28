@@ -11,6 +11,7 @@ cp .env.example .env.local
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
+API_URL=http://localhost:8000
 NEXT_PUBLIC_KAKAO_MAP_KEY=your_kakao_javascript_key
 KAKAO_REST_API_KEY=your_kakao_rest_api_key
 ```
@@ -31,7 +32,8 @@ npm run dev
 ```
 
 ## 4. 주의
-- 구독 저장은 `app/api/subscribe/route.js`를 거쳐 백엔드 `/subscribe`로 전달됩니다.
+- 구독 저장은 프론트에서 `/api/subscribe`로 호출하고, `app/api/subscribe/route.js`가 백엔드 `/subscribe`로 전달합니다.
+- `app/api/subscribe/route.js`는 `API_URL`을 우선 사용하고, 없으면 `NEXT_PUBLIC_API_URL`을 사용합니다.
 - 급매 목록 조회는 `/filter`를 사용합니다.
 - 지역 목록은 `/regions`를 사용합니다.
 - AI 입지 태그는 `app/api/ai/listing-tags/route.js`와 `KAKAO_REST_API_KEY`가 필요합니다.

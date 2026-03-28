@@ -15,6 +15,7 @@ npm run dev
 ## 필요한 환경변수
 
 - `NEXT_PUBLIC_API_URL` : FastAPI 백엔드 주소
+- `API_URL` : (선택) Next API Route에서 사용할 서버 전용 백엔드 주소
 - `NEXT_PUBLIC_KAKAO_MAP_KEY` : 카카오맵 JavaScript 키
 - `KAKAO_REST_API_KEY` : AI 입지 태그용 카카오 로컬 REST 키
 

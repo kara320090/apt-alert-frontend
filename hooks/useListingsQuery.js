@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { dummyListings } from "@/data/dummy";
 import { enrichListings, applyFilter } from "@/lib/filter";
-import { fetchListings } from "@/lib/api/listings";
+import { fetchListings } from "@/lib/api";
 
 function mapBackendItem(item) {
   return {
