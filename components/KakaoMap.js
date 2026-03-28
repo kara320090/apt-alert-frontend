@@ -42,7 +42,8 @@ function getLng(item) {
 }
 
 function makeCoordsCacheKey(item) {
-  return `${getDongName(item)}|${getAptName(item)}`.trim();
+  const regionCode = item?.region_code || item?.properties?.region_code || "";
+  return `${regionCode}|${getDongName(item)}|${getAptName(item)}`.trim();
 }
 
 function formatPriceText(value) {

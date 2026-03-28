@@ -142,8 +142,17 @@ export default function Home() {
     region: "전체",
     grade: "전체",
     minDiscount: 5,
-    aiEnabled: false,
+    aiEnabled: false, // localStorage sync happens in useEffect below
   });
+
+  // Sync AI toggle state from localStorage on mount (FilterBar also reads it,
+  // so we need page state to match to avoid showing AI=ON but loading without AI)
+  useEffect(() => {
+    const savedAi = localStorage.getItem("apt-alert-ai-enabled") === "true";
+    if (savedAi) {
+      setFilters((prev) => ({ ...prev, aiEnabled: true }));
+    }
+  }, []);
 
   const resolvedSelectedListing = selectedListing || visibleListings[0] || null;
   const filterSummary = useMemo(() => buildFilterSummary(filters), [filters]);
