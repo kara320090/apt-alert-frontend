@@ -2,15 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { dummyListings, regions as fallbackRegions } from "../data/dummy";
-import {
-  enrichListings,
-  applyFilter,
-  calcMarketAvg,
-  calcDiscountRate,
-  classifyGrade,
-} from "../lib/filter";
+import { enrichListings, applyFilter } from "../lib/filter";
 import { clearAiMeta, enrichWithPriceAiOnly } from "../lib/aiSummary";
-import { fetchAiListingTags, fetchRegions, fetchListings } from "../lib/api";
+import { fetchAiListingTags, fetchFilter, fetchRegions } from "../lib/api";
 import FilterBar from "../components/FilterBar";
 import ListingCard from "../components/ListingCard";
 import EmailForm from "../components/EmailForm";
@@ -21,56 +15,6 @@ import RegionReport from "../components/RegionReport";
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
-const LISTINGS_FETCH_PER_PAGE = 500;
-const MAX_LISTINGS_FETCH_PAGES = 20;
-
-function mapItems(items) {
-  return (items || []).map(mapItem);
-}
-
-function recalcMarketByTwelveMonths(items, referenceTrades = items) {
-  const pool = referenceTrades || [];
-
-  return (items || []).map((item) => {
-    const marketAvg = calcMarketAvg(pool, item) || 0;
-    const discountRate = calcDiscountRate(Number(item.price || 0), marketAvg);
-
-    return {
-      ...item,
-      market_avg: marketAvg,
-      discount_rate: discountRate,
-      grade: classifyGrade(discountRate),
-    };
-  });
-}
-
-async function fetchReferenceTrades(pageItems, regionFilter, signal) {
-  if (!API_URL) return [];
-
-  const collected = [];
-  let currentPage = 1;
-  let totalPages = 1;
-
-  while (currentPage <= totalPages && currentPage <= MAX_LISTINGS_FETCH_PAGES) {
-    const json = await fetchListings({
-      region: regionFilter,
-      page: currentPage,
-      perPage: LISTINGS_FETCH_PER_PAGE,
-      signal,
-    });
-
-    const mapped = mapItems(json?.data || []);
-    collected.push(...mapped);
-
-    const apiTotalPages = Number(json?.total_pages || 1);
-    totalPages = Number.isFinite(apiTotalPages) && apiTotalPages > 0 ? apiTotalPages : 1;
-
-    if (mapped.length === 0) break;
-    currentPage += 1;
-  }
-
-  return collected;
-}
 
 function mapItem(item) {
   const properties = item?.properties || {};
@@ -100,7 +44,7 @@ function mapItem(item) {
     deal_year: parseInt(String(item?.deal_date || "").split("-")?.[0] || "0", 10),
     deal_month: parseInt(String(item?.deal_date || "").split("-")?.[1] || "0", 10),
     cdeal_type: item?.is_cancelled ? "Y" : "",
-    market_avg: 0,
+    market_avg: Number(item?.market_avg ?? properties?.market_avg ?? 0),
     discount_rate: Number(item?.discount_rate ?? 0),
     grade: item?.grade || "일반",
     lat: item?.lat ?? null,
@@ -294,22 +238,18 @@ export default function Home() {
         let pages = 1;
 
         if (API_URL) {
-          const baseTrades = await fetchReferenceTrades(
-            [],
-            filters.region,
-            controller.signal
-          );
-          const enriched = recalcMarketByTwelveMonths(baseTrades);
-          const locallyFiltered = applyFilter(enriched, {
+          const json = await fetchFilter({
             region: filters.region,
             grade: filters.grade,
             minDiscount: filters.minDiscount,
+            page,
+            perPage,
+            signal: controller.signal,
           });
 
-          count = locallyFiltered.length;
-          pages = Math.max(1, Math.ceil(count / perPage));
-          const start = (page - 1) * perPage;
-          items = locallyFiltered.slice(start, start + perPage);
+          items = (json?.data || []).map(mapItem);
+          count = Number(json?.count || 0);
+          pages = Number(json?.total_pages || 1);
         } else {
           await new Promise((r) => setTimeout(r, 250));
 
