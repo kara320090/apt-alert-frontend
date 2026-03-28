@@ -8,7 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "next": "16.1.6",
+    "next": "^16.2.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "resend": "^6.9.4"
@@ -16,7 +16,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "^16.2.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2"
   }
