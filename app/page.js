@@ -16,6 +16,22 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
 
+function resolveMarketAvg(item, properties) {
+  const candidates = [
+    item?.market_avg_6m,
+    properties?.market_avg_6m,
+    item?.market_avg6m,
+    properties?.market_avg6m,
+    item?.market_avg,
+    properties?.market_avg,
+    item?.market_avg_3m,
+    properties?.market_avg_3m,
+  ];
+
+  const value = candidates.find((candidate) => Number.isFinite(Number(candidate)) && Number(candidate) > 0);
+  return Number(value ?? 0);
+}
+
 function mapItem(item) {
   const properties = item?.properties || {};
 
@@ -43,7 +59,7 @@ function mapItem(item) {
     deal_year: parseInt(String(item?.deal_date || "").split("-")?.[0] || "0", 10),
     deal_month: parseInt(String(item?.deal_date || "").split("-")?.[1] || "0", 10),
     cdeal_type: item?.is_cancelled ? "Y" : "",
-    market_avg: Number(item?.market_avg ?? 0),
+    market_avg: resolveMarketAvg(item, properties),
     discount_rate: Number(item?.discount_rate ?? 0),
     grade: item?.grade || "일반",
     lat: item?.lat ?? null,
