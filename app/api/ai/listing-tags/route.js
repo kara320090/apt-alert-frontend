@@ -8,6 +8,52 @@ const REST_API_KEY = process.env.KAKAO_REST_API_KEY;
 const locationCache = new Map();
 const LOCATION_CACHE_MAX = 500;
 
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[()\[\].,]/g, "");
+}
+
+function scoreKeywordResult(result, aptName, regionName) {
+  const aptNorm = normalizeText(aptName);
+  const regionNorm = normalizeText(regionName);
+  const placeNorm = normalizeText(result?.place_name);
+  const addressNorm = normalizeText(result?.address_name || result?.road_address_name);
+
+  let score = 0;
+  if (aptNorm && placeNorm.includes(aptNorm)) score += 3;
+  if (regionNorm && (addressNorm.includes(regionNorm) || placeNorm.includes(regionNorm))) score += 2;
+
+  const category = String(result?.category_name || "").toLowerCase();
+  if (category.includes("부동산") || category.includes("중개")) score -= 2;
+  if (category.includes("아파트") || category.includes("주거")) score += 1;
+
+  return score;
+}
+
+function pickBestKeywordResult(results, aptName, regionName) {
+  const list = Array.isArray(results) ? results : [];
+  if (list.length === 0) return null;
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  list.forEach((result) => {
+    const score = scoreKeywordResult(result, aptName, regionName);
+    if (score > bestScore) {
+      best = result;
+      bestScore = score;
+    }
+  });
+
+  if (!best || bestScore < 2) {
+    return null;
+  }
+
+  return best;
+}
+
 function uniqueTags(tags) {
   return [...new Set((tags || []).filter(Boolean))];
 }
@@ -78,10 +124,8 @@ async function findApartmentBase(listing) {
     const docs = Array.isArray(json.documents) ? json.documents : [];
     if (docs.length === 0) continue;
 
-    const matched =
-      docs.find((doc) =>
-        String(doc.place_name || "").includes(String(listing.apt_name || ""))
-      ) || docs[0];
+    const matched = pickBestKeywordResult(docs, listing.apt_name, listing.region_name);
+    if (!matched) continue;
 
     const base = {
       x: toNumber(matched.x),

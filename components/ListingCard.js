@@ -6,12 +6,12 @@ export default function ListingCard({ listing, isSelected }) {
   function formatPrice(price) {
     const uk = Math.floor(Number(price || 0) / 10000);
     const man = Number(price || 0) % 10000;
-    if (uk > 0 && man > 0) return `${uk}억 ${man.toLocaleString()}`;
+    if (uk > 0 && man > 0) return `${uk}억 ${man.toLocaleString()}만`;
     if (uk > 0) return `${uk}억`;
     return `${Number(price || 0).toLocaleString()}만`;
   }
 
-  const discountAmount = listing.market_avg - listing.price;
+  const discountAmount = Math.max(0, Number(listing.market_avg || 0) - Number(listing.price || 0));
   const tags = Array.isArray(listing.ai_tags) ? listing.ai_tags : [];
   const risk = listing.risk || null;
   const trend = listing.price_trend || null;
