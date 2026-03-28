@@ -4,11 +4,58 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const KAKAO_MAP_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
 const COORDS_CACHE_KEY = "apt-alert-coords-cache-v4";
+const COORDS_CACHE_VERSION = 2;
+const COORDS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+const MAX_CONCURRENT_PLACE_SEARCH = 4;
+
+function isFiniteNumber(value) {
+  return Number.isFinite(Number(value));
+}
+
+function isValidCacheEntry(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  if (entry.version !== COORDS_CACHE_VERSION) return false;
+  if (!isFiniteNumber(entry.lat) || !isFiniteNumber(entry.lng)) return false;
+  if (!isFiniteNumber(entry.expiresAt)) return false;
+  return Number(entry.expiresAt) > Date.now();
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[()\[\].,]/g, "");
+}
 
 function readCoordsCache() {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(localStorage.getItem(COORDS_CACHE_KEY) || "{}");
+    const raw = JSON.parse(localStorage.getItem(COORDS_CACHE_KEY) || "{}");
+    if (!raw || typeof raw !== "object") return {};
+
+    const now = Date.now();
+    const filtered = {};
+    Object.entries(raw).forEach(([key, value]) => {
+      if (isValidCacheEntry(value)) {
+        filtered[key] = value;
+      } else if (
+        value &&
+        typeof value === "object" &&
+        isFiniteNumber(value.lat) &&
+        isFiniteNumber(value.lng)
+      ) {
+        filtered[key] = {
+          lat: Number(value.lat),
+          lng: Number(value.lng),
+          version: COORDS_CACHE_VERSION,
+          createdAt: now,
+          expiresAt: now + COORDS_CACHE_TTL_MS,
+          confidence: "legacy",
+        };
+      }
+    });
+
+    return filtered;
   } catch {
     return {};
   }
@@ -44,6 +91,50 @@ function getLng(item) {
 function makeCoordsCacheKey(item) {
   const regionCode = item?.region_code || item?.properties?.region_code || "";
   return `${regionCode}|${getDongName(item)}|${getAptName(item)}`.trim();
+}
+
+function scoreKeywordResult(result, aptName, dongName) {
+  const aptNorm = normalizeText(aptName);
+  const dongNorm = normalizeText(dongName);
+  const placeNorm = normalizeText(result?.place_name);
+  const addressNorm = normalizeText(result?.address_name || result?.road_address_name);
+
+  let score = 0;
+  if (aptNorm && placeNorm.includes(aptNorm)) score += 3;
+  if (dongNorm && (addressNorm.includes(dongNorm) || placeNorm.includes(dongNorm))) score += 2;
+
+  const category = String(result?.category_name || "").toLowerCase();
+  if (category.includes("부동산") || category.includes("중개")) score -= 2;
+  if (category.includes("아파트") || category.includes("주거")) score += 1;
+
+  if (isFiniteNumber(result?.distance)) {
+    const distance = Number(result.distance);
+    if (distance <= 1000) score += 1;
+  }
+
+  return score;
+}
+
+function pickBestKeywordResult(results, aptName, dongName) {
+  const list = Array.isArray(results) ? results : [];
+  if (list.length === 0) return null;
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  list.forEach((result) => {
+    const score = scoreKeywordResult(result, aptName, dongName);
+    if (score > bestScore) {
+      best = result;
+      bestScore = score;
+    }
+  });
+
+  if (!best || bestScore < 2) {
+    return null;
+  }
+
+  return best;
 }
 
 function formatPriceText(value) {
@@ -306,6 +397,7 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     };
 
     const finalize = () => {
+      if (cancelled) return;
       completed += 1;
       setSearchingCoords(pendingSearches > 0);
 
@@ -336,22 +428,42 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       found += 1;
     };
 
-    listings.forEach((listing) => {
+    const searchByKeyword = (listing, keyword) =>
+      new Promise((resolve) => {
+        pendingSearches += 1;
+        setSearchingCoords(true);
+
+        places.keywordSearch(keyword, (result, searchStatus) => {
+          pendingSearches -= 1;
+          if (cancelled) {
+            resolve(null);
+            return;
+          }
+
+          if (searchStatus !== kakao.maps.services.Status.OK) {
+            resolve(null);
+            return;
+          }
+
+          const best = pickBestKeywordResult(result, getAptName(listing), getDongName(listing));
+          resolve(best);
+        });
+      });
+
+    const processListing = async (listing) => {
       const lat = getLat(listing);
       const lng = getLng(listing);
 
       if (lat !== null && lng !== null) {
-        const coords = new kakao.maps.LatLng(lat, lng);
-        paintMarker(listing, coords);
+        paintMarker(listing, new kakao.maps.LatLng(lat, lng));
         finalize();
         return;
       }
 
       const cacheKey = makeCoordsCacheKey(listing);
       const cached = cache[cacheKey];
-      if (cached?.lat && cached?.lng) {
-        const coords = new kakao.maps.LatLng(cached.lat, cached.lng);
-        paintMarker(listing, coords);
+      if (isValidCacheEntry(cached)) {
+        paintMarker(listing, new kakao.maps.LatLng(cached.lat, cached.lng));
         finalize();
         return;
       }
@@ -367,24 +479,36 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         return;
       }
 
-      pendingSearches += 1;
-      setSearchingCoords(true);
+      const best = await searchByKeyword(listing, keyword);
+      if (best && !cancelled) {
+        const coords = new kakao.maps.LatLng(best.y, best.x);
+        paintMarker(listing, coords);
+        cache[cacheKey] = {
+          lat: Number(best.y),
+          lng: Number(best.x),
+          version: COORDS_CACHE_VERSION,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
+          confidence: "keyword-scored",
+          placeName: best.place_name || "",
+        };
+        writeCoordsCache(cache);
+      }
 
-      places.keywordSearch(keyword, (result, searchStatus) => {
-        if (cancelled) return;
-        pendingSearches -= 1;
-        if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
-          const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
-          paintMarker(listing, coords);
-          cache[cacheKey] = {
-            lat: Number(result[0].y),
-            lng: Number(result[0].x),
-          };
-          writeCoordsCache(cache);
-        }
-        finalize();
-      });
+      finalize();
+    };
+
+    const queue = [...listings];
+    const workerCount = Math.min(MAX_CONCURRENT_PLACE_SEARCH, queue.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (!cancelled && queue.length > 0) {
+        const listing = queue.shift();
+        if (!listing) return;
+        await processListing(listing);
+      }
     });
+
+    Promise.all(workers).catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -513,7 +637,7 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     const cache = readCoordsCache();
     const cacheKey = makeCoordsCacheKey(resolvedSelectedListing);
     const cached = cache[cacheKey];
-    if (cached?.lat && cached?.lng) {
+    if (isValidCacheEntry(cached)) {
       const coords = new kakao.maps.LatLng(cached.lat, cached.lng);
       coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
       showSelection(coords);
@@ -530,10 +654,23 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     setSearchingCoords(true);
     places.keywordSearch(keyword, (result, searchStatus) => {
       setSearchingCoords(false);
-      if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
-        const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
+      const best =
+        searchStatus === kakao.maps.services.Status.OK
+          ? pickBestKeywordResult(result, getAptName(resolvedSelectedListing), getDongName(resolvedSelectedListing))
+          : null;
+
+      if (best) {
+        const coords = new kakao.maps.LatLng(best.y, best.x);
         coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
-        cache[cacheKey] = { lat: Number(result[0].y), lng: Number(result[0].x) };
+        cache[cacheKey] = {
+          lat: Number(best.y),
+          lng: Number(best.x),
+          version: COORDS_CACHE_VERSION,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
+          confidence: "keyword-scored",
+          placeName: best.place_name || "",
+        };
         writeCoordsCache(cache);
         showSelection(coords);
       } else {
