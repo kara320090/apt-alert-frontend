@@ -281,6 +281,8 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       return;
     }
 
+    let cancelled = false;
+
     const bounds = new kakao.maps.LatLngBounds();
     const places = kakao.maps.services ? new kakao.maps.services.Places() : null;
     const cache = readCoordsCache();
@@ -368,6 +370,7 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       setSearchingCoords(true);
 
       places.keywordSearch(keyword, (result, searchStatus) => {
+        if (cancelled) return;
         pendingSearches -= 1;
         if (searchStatus === kakao.maps.services.Status.OK && result?.[0]) {
           const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
@@ -381,6 +384,9 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         finalize();
       });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [listings, status, onSelectListing]);
 
   useEffect(() => {
