@@ -12,8 +12,12 @@ export default function ListingCard({ listing, isSelected }) {
   }
 
   const discountAmount = Math.max(0, Number(listing.market_avg || 0) - Number(listing.price || 0));
+  const discountRate = Number.isFinite(Number(listing.discount_rate))
+    ? Number(listing.discount_rate)
+    : 0;
   const tags = Array.isArray(listing.ai_tags) ? listing.ai_tags : [];
   const risk = listing.risk || null;
+  const riskSignals = Array.isArray(risk?.signals) ? risk.signals : [];
   const trend = listing.price_trend || null;
 
   const riskColors = {
@@ -61,7 +65,7 @@ export default function ListingCard({ listing, isSelected }) {
         {/* Scaled down discount percentage */}
         <div className="text-right flex flex-col items-end w-1/3">
            <p className={`text-3xl font-black tracking-tighter ${isSuper ? "text-red-600" : "text-orange-500"}`}>
-            -{listing.discount_rate}%
+            -{discountRate}%
           </p>
         </div>
       </div>
@@ -113,13 +117,13 @@ export default function ListingCard({ listing, isSelected }) {
       )}
 
       {/* 5. Risk Signals (주의/위험만 표시) */}
-      {risk && risk.level !== "낮음" && risk.signals.length > 0 && (
+      {risk && risk.level !== "낮음" && riskSignals.length > 0 && (
         <div className={`mt-3 rounded-xl px-3 py-2 border ${risk.level === "위험" ? "bg-red-50 border-red-100" : "bg-yellow-50 border-yellow-100"}`}>
           <p className={`text-[10px] font-black uppercase tracking-[0.14em] mb-1.5 ${risk.level === "위험" ? "text-red-600" : "text-yellow-600"}`}>
             ⚠ 위험 신호 (패턴 기반 경고)
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {risk.signals.map((signal) => (
+            {riskSignals.map((signal) => (
               <span key={signal} className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${risk.level === "위험" ? "bg-white text-red-600 border-red-200" : "bg-white text-yellow-600 border-yellow-200"}`}>
                 {signal}
               </span>

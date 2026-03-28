@@ -35,6 +35,7 @@ function readCoordsCache() {
 
     const now = Date.now();
     const filtered = {};
+    let dirty = false;
     Object.entries(raw).forEach(([key, value]) => {
       if (isValidCacheEntry(value)) {
         filtered[key] = value;
@@ -52,8 +53,17 @@ function readCoordsCache() {
           expiresAt: now + COORDS_CACHE_TTL_MS,
           confidence: "legacy",
         };
+        dirty = true;
+      } else {
+        dirty = true;
       }
     });
+
+    if (dirty) {
+      try {
+        localStorage.setItem(COORDS_CACHE_KEY, JSON.stringify(filtered));
+      } catch {}
+    }
 
     return filtered;
   } catch {
