@@ -16,24 +16,64 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
 
-function resolveMarketAvg(item, properties) {
-  const candidates = [
-    item?.market_avg_6m,
-    properties?.market_avg_6m,
-    item?.market_avg6m,
-    properties?.market_avg6m,
-    item?.market_avg,
-    properties?.market_avg,
-    item?.market_avg_3m,
-    properties?.market_avg_3m,
+function toPositiveNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function resolveMarketAvgInfo(item, properties) {
+  const sources = [
+    ["market_avg_6m", item?.market_avg_6m],
+    ["properties.market_avg_6m", properties?.market_avg_6m],
+    ["market_avg6m", item?.market_avg6m],
+    ["properties.market_avg6m", properties?.market_avg6m],
+    ["market_avg", item?.market_avg],
+    ["properties.market_avg", properties?.market_avg],
+    ["market_avg_3m", item?.market_avg_3m],
+    ["properties.market_avg_3m", properties?.market_avg_3m],
   ];
 
-  const value = candidates.find((candidate) => Number.isFinite(Number(candidate)) && Number(candidate) > 0);
-  return Number(value ?? 0);
+  for (const [source, candidate] of sources) {
+    const parsed = toPositiveNumber(candidate);
+    if (parsed != null) {
+      return { source, value: parsed };
+    }
+  }
+
+  return { source: "none", value: 0 };
 }
 
 function mapItem(item) {
   const properties = item?.properties || {};
+  const marketAvgInfo = resolveMarketAvgInfo(item, properties);
+  const price = Number(item?.price ?? 0);
+  const calculatedDiscountRate =
+    marketAvgInfo.value > 0 ? Math.round((1 - price / marketAvgInfo.value) * 1000) / 10 : 0;
+
+  if (
+    process.env.NODE_ENV !== "production" &&
+    (marketAvgInfo.source.includes("3m") || marketAvgInfo.source === "none" || calculatedDiscountRate >= 35)
+  ) {
+    console.info("[market-avg-debug]", {
+      id: item?.id,
+      apt_seq: item?.apt_seq || properties?.apt_seq || null,
+      apt_name: item?.apt_name || properties?.apt_name || "",
+      source: marketAvgInfo.source,
+      market_avg: marketAvgInfo.value,
+      price,
+      calculated_discount_rate: calculatedDiscountRate,
+      candidates: {
+        market_avg_6m: item?.market_avg_6m,
+        properties_market_avg_6m: properties?.market_avg_6m,
+        market_avg6m: item?.market_avg6m,
+        properties_market_avg6m: properties?.market_avg6m,
+        market_avg: item?.market_avg,
+        properties_market_avg: properties?.market_avg,
+        market_avg_3m: item?.market_avg_3m,
+        properties_market_avg_3m: properties?.market_avg_3m,
+      },
+    });
+  }
 
   return {
     id: item?.id,
@@ -54,12 +94,12 @@ function mapItem(item) {
       properties?.dong ||
       item?.region_name ||
       "",
-    price: Number(item?.price ?? 0),
+    price,
     floor: Number(item?.floor ?? 0),
     deal_year: parseInt(String(item?.deal_date || "").split("-")?.[0] || "0", 10),
     deal_month: parseInt(String(item?.deal_date || "").split("-")?.[1] || "0", 10),
     cdeal_type: item?.is_cancelled ? "Y" : "",
-    market_avg: resolveMarketAvg(item, properties),
+    market_avg: marketAvgInfo.value,
     discount_rate: Number(item?.discount_rate ?? 0),
     grade: item?.grade || "일반",
     lat: item?.lat ?? null,
