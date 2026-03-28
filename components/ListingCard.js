@@ -89,24 +89,28 @@ export default function ListingCard({ listing, isSelected }) {
         </div>
       )}
 
-      {/* 4. Premium AI Intel Box */}
-      <div className="bg-[#f8faff] rounded-xl p-4 border border-blue-50/50">
-        <div className="flex items-center gap-1.5 mb-2">
-          <span className="text-[11px] font-black text-blue-600 uppercase tracking-wider">AI 해석</span>
-        </div>
-        <p className="text-[13px] font-medium text-slate-700 leading-relaxed mb-3">
-          {listing.ai_summary || `AI가 시세 대비 하락폭을 분석했습니다. 현재 진입하기 좋은 가격대입니다.`}
-        </p>
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {tags.map((tag, idx) => (
-              <span key={idx} className="text-[11px] font-bold text-blue-600 bg-white border border-blue-100 px-2.5 py-1 rounded-md shadow-sm">
-                {tag}
-              </span>
-            ))}
+      {/* 4. AI Intel Box — 태그 또는 요약이 있을 때만 표시 */}
+      {(tags.length > 0 || listing.ai_summary) && (
+        <div className="bg-[#f8faff] rounded-xl p-4 border border-blue-50/50">
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="text-[11px] font-black text-blue-600 uppercase tracking-wider">AI 해석</span>
           </div>
-        )}
-      </div>
+          {listing.ai_summary && (
+            <p className="text-[13px] font-medium text-slate-700 leading-relaxed mb-3">
+              {listing.ai_summary}
+            </p>
+          )}
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {tags.map((tag, idx) => (
+                <span key={idx} className="text-[11px] font-bold text-blue-600 bg-white border border-blue-100 px-2.5 py-1 rounded-md shadow-sm">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 5. Risk Signals (주의/위험만 표시) */}
       {risk && risk.level !== "낮음" && risk.signals.length > 0 && (

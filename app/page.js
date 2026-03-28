@@ -285,14 +285,8 @@ export default function Home() {
 
     async function enrichVisiblePage() {
       if (!filters.aiEnabled) {
-        setVisibleListings(
-          rawListings.map((item) => ({
-            ...item,
-            ai_tags: [],
-            ai_summary: "",
-            ai_location_meta: null,
-          }))
-        );
+        // AI OFF: 카카오 API 없이 가격 기반 태그/요약만 생성 (무료, 즉시 반환)
+        setVisibleListings(enrichWithPriceAiOnly(rawListings, true));
         setAiLoading(false);
         return;
       }

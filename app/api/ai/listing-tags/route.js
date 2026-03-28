@@ -35,18 +35,26 @@ async function kakaoLocalFetch(path, params = {}) {
     }
   });
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `KakaoAK ${REST_API_KEY}`,
-    },
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-  if (!res.ok) {
-    throw new Error(`Kakao Local API error: ${res.status}`);
+  try {
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: `KakaoAK ${REST_API_KEY}`,
+      },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      throw new Error(`Kakao Local API error: ${res.status}`);
+    }
+
+    return res.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return res.json();
 }
 
 async function findApartmentBase(listing) {
