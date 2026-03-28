@@ -49,6 +49,8 @@ function mapItem(item) {
     lng: item?.lng ?? null,
     ai_tags: item?.ai_tags || [],
     ai_summary: item?.ai_summary || "",
+    risk: item?.risk || null,
+    price_trend: item?.price_trend || null,
   };
 }
 

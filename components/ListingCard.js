@@ -13,6 +13,19 @@ export default function ListingCard({ listing, isSelected }) {
 
   const discountAmount = listing.market_avg - listing.price;
   const tags = Array.isArray(listing.ai_tags) ? listing.ai_tags : [];
+  const risk = listing.risk || null;
+  const trend = listing.price_trend || null;
+
+  const riskColors = {
+    위험: "bg-red-50 text-red-600 border-red-200",
+    주의: "bg-yellow-50 text-yellow-600 border-yellow-200",
+  };
+  const trendColors = {
+    상승: "text-red-500",
+    하락: "text-blue-500",
+    보합: "text-slate-400",
+  };
+  const trendArrows = { 상승: "↑", 하락: "↓", 보합: "→" };
 
   return (
     <div className={`relative bg-white rounded-2xl border p-6 transition-all duration-300 group mb-4 cursor-pointer ${
@@ -24,10 +37,15 @@ export default function ListingCard({ listing, isSelected }) {
       {/* 1. Header: Asset & Urgency */}
       <div className="flex justify-between items-start mb-4">
         <div className="flex flex-col gap-1.5 w-2/3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className={`text-[10px] font-black px-2.5 py-1 rounded tracking-widest text-white shadow-sm ${isSuper ? "bg-red-600" : "bg-orange-500"}`}>
               {listing.grade}
             </span>
+            {risk && risk.level !== "낮음" && (
+              <span className={`text-[10px] font-black px-2 py-1 rounded border ${riskColors[risk.level]}`}>
+                ⚠ {risk.level}
+              </span>
+            )}
             <span className="text-xs font-bold text-gray-400">
               시세 대비 <span className={isSuper ? "text-red-600" : "text-orange-500"}>{formatPrice(discountAmount)}</span> 저렴
             </span>
@@ -59,7 +77,19 @@ export default function ListingCard({ listing, isSelected }) {
         </div>
       </div>
 
-      {/* 3. Premium AI Intel Box */}
+      {/* 3. Price Trend */}
+      {trend && (
+        <div className="flex items-center justify-between mb-4 px-1">
+          <span className={`text-xs font-black ${trendColors[trend.direction]}`}>
+            {trendArrows[trend.direction]} 시세 {trend.direction} ({Math.abs(trend.trend_rate)}%/월)
+          </span>
+          <span className="text-[11px] text-slate-400">
+            3개월 후 예상 <span className="font-bold text-slate-600">{formatPrice(trend.forecast_3m)}</span>
+          </span>
+        </div>
+      )}
+
+      {/* 4. Premium AI Intel Box */}
       <div className="bg-[#f8faff] rounded-xl p-4 border border-blue-50/50">
         <div className="flex items-center gap-1.5 mb-2">
           <span className="text-[11px] font-black text-blue-600 uppercase tracking-wider">AI 해석</span>
@@ -77,6 +107,22 @@ export default function ListingCard({ listing, isSelected }) {
           </div>
         )}
       </div>
+
+      {/* 5. Risk Signals (주의/위험만 표시) */}
+      {risk && risk.level !== "낮음" && risk.signals.length > 0 && (
+        <div className={`mt-3 rounded-xl px-3 py-2 border ${risk.level === "위험" ? "bg-red-50 border-red-100" : "bg-yellow-50 border-yellow-100"}`}>
+          <p className={`text-[10px] font-black uppercase tracking-[0.14em] mb-1.5 ${risk.level === "위험" ? "text-red-600" : "text-yellow-600"}`}>
+            ⚠ 위험 신호 (패턴 기반 경고)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {risk.signals.map((signal) => (
+              <span key={signal} className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${risk.level === "위험" ? "bg-white text-red-600 border-red-200" : "bg-white text-yellow-600 border-yellow-200"}`}>
+                {signal}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
