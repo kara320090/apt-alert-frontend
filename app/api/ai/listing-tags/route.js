@@ -7,6 +7,45 @@ export const runtime = "nodejs";
 const REST_API_KEY = process.env.KAKAO_REST_API_KEY;
 const locationCache = new Map();
 const LOCATION_CACHE_MAX = 500;
+const LISTING_ENRICH_CONCURRENCY = 4;
+const CATEGORY_SEARCH_CONCURRENCY = 4;
+
+function getLocationCache(key) {
+  if (!locationCache.has(key)) return undefined;
+  const value = locationCache.get(key);
+  locationCache.delete(key);
+  locationCache.set(key, value);
+  return value;
+}
+
+function setLocationCache(key, value) {
+  if (locationCache.has(key)) {
+    locationCache.delete(key);
+  }
+  while (locationCache.size >= LOCATION_CACHE_MAX) {
+    const oldestKey = locationCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    locationCache.delete(oldestKey);
+  }
+  locationCache.set(key, value);
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const safeConcurrency = Math.max(1, Math.min(Number(concurrency) || 1, items.length || 1));
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: safeConcurrency }, () => worker()));
+  return results;
+}
 
 function normalizeText(value) {
   return String(value || "")
@@ -106,8 +145,9 @@ async function kakaoLocalFetch(path, params = {}) {
 async function findApartmentBase(listing) {
   const cacheKey = `base:${listing.region_name || ""}:${listing.apt_name || ""}`;
 
-  if (locationCache.has(cacheKey)) {
-    return locationCache.get(cacheKey);
+  const cached = getLocationCache(cacheKey);
+  if (cached !== undefined) {
+    return cached;
   }
 
   const queries = [
@@ -135,13 +175,11 @@ async function findApartmentBase(listing) {
       road_address_name: matched.road_address_name || "",
     };
 
-    if (locationCache.size >= LOCATION_CACHE_MAX) locationCache.clear();
-    locationCache.set(cacheKey, base);
+    setLocationCache(cacheKey, base);
     return base;
   }
 
-  if (locationCache.size >= LOCATION_CACHE_MAX) locationCache.clear();
-  locationCache.set(cacheKey, null);
+  setLocationCache(cacheKey, null);
   return null;
 }
 
@@ -165,6 +203,17 @@ async function searchCategory({ x, y, categoryCode, radius = 700, size = 15 }) {
     count: Number(json.meta?.total_count || docs.length || 0),
     nearestDistance,
   };
+}
+
+async function safeSearchCategory(params) {
+  try {
+    return await searchCategory(params);
+  } catch {
+    return {
+      count: 0,
+      nearestDistance: null,
+    };
+  }
 }
 
 function buildLocationMeta(metrics) {
@@ -260,8 +309,9 @@ async function buildLocationMetaForListing(listing) {
   }
 
   const cacheKey = `meta:${listing.region_name || ""}:${listing.apt_name || ""}`;
-  if (locationCache.has(cacheKey)) {
-    return locationCache.get(cacheKey);
+  const cached = getLocationCache(cacheKey);
+  if (cached !== undefined) {
+    return cached;
   }
 
   const base = await findApartmentBase(listing);
@@ -272,47 +322,41 @@ async function buildLocationMetaForListing(listing) {
       ai_summary: "",
       ai_location_meta: null,
     };
-    if (locationCache.size >= LOCATION_CACHE_MAX) locationCache.clear();
-    locationCache.set(cacheKey, empty);
+    setLocationCache(cacheKey, empty);
     return empty;
   }
 
-  const [
-    subway,
-    school,
-    daycare,
-    hagwon,
-    hospital,
-    pharmacy,
-    convenience,
-    market,
-    cafe,
-    restaurant,
-  ] = await Promise.all([
-    searchCategory({ x: base.x, y: base.y, categoryCode: "SW8", radius: 1200 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "SC4", radius: 1000 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "PS3", radius: 1000 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "AC5", radius: 1200 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "HP8", radius: 1000 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "PM9", radius: 700 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "CS2", radius: 700 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "MT1", radius: 1000 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "CE7", radius: 700 }),
-    searchCategory({ x: base.x, y: base.y, categoryCode: "FD6", radius: 700 }),
-  ]);
+  const categoryQueries = [
+    { key: "subway", categoryCode: "SW8", radius: 1200 },
+    { key: "school", categoryCode: "SC4", radius: 1000 },
+    { key: "daycare", categoryCode: "PS3", radius: 1000 },
+    { key: "hagwon", categoryCode: "AC5", radius: 1200 },
+    { key: "hospital", categoryCode: "HP8", radius: 1000 },
+    { key: "pharmacy", categoryCode: "PM9", radius: 700 },
+    { key: "convenience", categoryCode: "CS2", radius: 700 },
+    { key: "market", categoryCode: "MT1", radius: 1000 },
+    { key: "cafe", categoryCode: "CE7", radius: 700 },
+    { key: "restaurant", categoryCode: "FD6", radius: 700 },
+  ];
 
-  const metrics = {
-    subway,
-    school,
-    daycare,
-    hagwon,
-    hospital,
-    pharmacy,
-    convenience,
-    market,
-    cafe,
-    restaurant,
-  };
+  const categoryResults = await mapWithConcurrency(
+    categoryQueries,
+    CATEGORY_SEARCH_CONCURRENCY,
+    async (query) => ({
+      key: query.key,
+      value: await safeSearchCategory({
+        x: base.x,
+        y: base.y,
+        categoryCode: query.categoryCode,
+        radius: query.radius,
+      }),
+    })
+  );
+
+  const metrics = categoryResults.reduce((acc, item) => {
+    acc[item.key] = item.value;
+    return acc;
+  }, {});
 
   const locationMeta = {
     ...buildLocationMeta(metrics),
@@ -322,8 +366,7 @@ async function buildLocationMetaForListing(listing) {
     },
   };
 
-  if (locationCache.size >= LOCATION_CACHE_MAX) locationCache.clear();
-  locationCache.set(cacheKey, locationMeta);
+  setLocationCache(cacheKey, locationMeta);
   return locationMeta;
 }
 
@@ -336,15 +379,17 @@ export async function POST(request) {
       return Response.json({ data: [] });
     }
 
-    const enriched = await Promise.all(
-      listings.map(async (listing) => {
+    const enriched = await mapWithConcurrency(
+      listings,
+      LISTING_ENRICH_CONCURRENCY,
+      async (listing) => {
         try {
           const locationMeta = await buildLocationMetaForListing(listing);
           return mergeAiMeta(listing, locationMeta);
         } catch (error) {
           return mergeAiMeta(listing);
         }
-      })
+      }
     );
 
     return Response.json({ data: enriched });
