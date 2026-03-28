@@ -9,4 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Render Server
-        run: curl -s ${{ secrets.RENDER_URL }}/health || true
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+        run: |
+          if [ -n "$RENDER_URL" ]; then
+            curl -s "$RENDER_URL/health" || true
+          fi
