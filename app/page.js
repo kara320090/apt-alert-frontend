@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { dummyListings, regions as fallbackRegions } from "../data/dummy";
-import { enrichListings, applyFilter } from "../lib/filter";
+import {
+  enrichListings,
+  applyFilter,
+  calcMarketAvg,
+  calcDiscountRate,
+  classifyGrade,
+} from "../lib/filter";
 import { clearAiMeta, enrichWithPriceAiOnly } from "../lib/aiSummary";
-import { fetchAiListingTags, fetchFilter, fetchRegions } from "../lib/api";
+import { fetchAiListingTags, fetchFilter, fetchRegions, fetchListings } from "../lib/api";
 import FilterBar from "../components/FilterBar";
 import ListingCard from "../components/ListingCard";
 import EmailForm from "../components/EmailForm";
@@ -15,80 +21,63 @@ import RegionReport from "../components/RegionReport";
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
-const MARKET_AVG_DEBUG_STORAGE_KEY = "apt-alert-debug-market-avg";
+const REFERENCE_PER_PAGE = 500;
+const MAX_REFERENCE_REGIONS = 6;
 
-function isMarketAvgDebugEnabled() {
-  if (typeof window === "undefined") {
-    return process.env.NODE_ENV !== "production";
-  }
-
-  try {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("debugMarketAvg") === "1") return true;
-    if (window.localStorage.getItem(MARKET_AVG_DEBUG_STORAGE_KEY) === "1") return true;
-  } catch {}
-
-  return process.env.NODE_ENV !== "production";
+function mapItems(items) {
+  return (items || []).map(mapItem);
 }
 
-function toPositiveNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
+function recalcMarketByTwelveMonths(items, referenceTrades) {
+  const pool = [...(referenceTrades || []), ...(items || [])];
+
+  return (items || []).map((item) => {
+    const marketAvg = calcMarketAvg(pool, item) || 0;
+    const discountRate = calcDiscountRate(Number(item.price || 0), marketAvg);
+
+    return {
+      ...item,
+      market_avg: marketAvg,
+      discount_rate: discountRate,
+      grade: classifyGrade(discountRate),
+    };
+  });
 }
 
-function resolveMarketAvgInfo(item, properties) {
-  const sources = [
-    ["market_avg_6m", item?.market_avg_6m],
-    ["properties.market_avg_6m", properties?.market_avg_6m],
-    ["market_avg6m", item?.market_avg6m],
-    ["properties.market_avg6m", properties?.market_avg6m],
-    ["market_avg", item?.market_avg],
-    ["properties.market_avg", properties?.market_avg],
-    ["market_avg_3m", item?.market_avg_3m],
-    ["properties.market_avg_3m", properties?.market_avg_3m],
-  ];
+async function fetchReferenceTrades(pageItems, regionFilter, signal) {
+  if (!API_URL || pageItems.length === 0) return [];
 
-  for (const [source, candidate] of sources) {
-    const parsed = toPositiveNumber(candidate);
-    if (parsed != null) {
-      return { source, value: parsed };
-    }
-  }
+  const targets =
+    regionFilter && regionFilter !== "전체"
+      ? [regionFilter]
+      : Array.from(
+          new Set(pageItems.map((item) => item.region_name).filter(Boolean))
+        ).slice(0, MAX_REFERENCE_REGIONS);
 
-  return { source: "none", value: 0 };
+  const chunks = await Promise.all(
+    targets.map(async (region) => {
+      try {
+        const json = await fetchListings({
+          region,
+          page: 1,
+          perPage: REFERENCE_PER_PAGE,
+          signal,
+        });
+        return mapItems(json?.data || []);
+      } catch (err) {
+        if (err?.name === "AbortError") throw err;
+        console.error("reference listings load failed:", err);
+        return [];
+      }
+    })
+  );
+
+  return chunks.flat();
 }
 
 function mapItem(item) {
   const properties = item?.properties || {};
-  const marketAvgInfo = resolveMarketAvgInfo(item, properties);
   const price = Number(item?.price ?? 0);
-  const calculatedDiscountRate =
-    marketAvgInfo.value > 0 ? Math.round((1 - price / marketAvgInfo.value) * 1000) / 10 : 0;
-
-  if (
-    isMarketAvgDebugEnabled() &&
-    (marketAvgInfo.source.includes("3m") || marketAvgInfo.source === "none" || calculatedDiscountRate >= 35)
-  ) {
-    console.info("[market-avg-debug]", {
-      id: item?.id,
-      apt_seq: item?.apt_seq || properties?.apt_seq || null,
-      apt_name: item?.apt_name || properties?.apt_name || "",
-      source: marketAvgInfo.source,
-      market_avg: marketAvgInfo.value,
-      price,
-      calculated_discount_rate: calculatedDiscountRate,
-      candidates: {
-        market_avg_6m: item?.market_avg_6m,
-        properties_market_avg_6m: properties?.market_avg_6m,
-        market_avg6m: item?.market_avg6m,
-        properties_market_avg6m: properties?.market_avg6m,
-        market_avg: item?.market_avg,
-        properties_market_avg: properties?.market_avg,
-        market_avg_3m: item?.market_avg_3m,
-        properties_market_avg_3m: properties?.market_avg_3m,
-      },
-    });
-  }
 
   return {
     id: item?.id,
@@ -114,7 +103,7 @@ function mapItem(item) {
     deal_year: parseInt(String(item?.deal_date || "").split("-")?.[0] || "0", 10),
     deal_month: parseInt(String(item?.deal_date || "").split("-")?.[1] || "0", 10),
     cdeal_type: item?.is_cancelled ? "Y" : "",
-    market_avg: marketAvgInfo.value,
+    market_avg: 0,
     discount_rate: Number(item?.discount_rate ?? 0),
     grade: item?.grade || "일반",
     lat: item?.lat ?? null,
@@ -317,7 +306,13 @@ export default function Home() {
             signal: controller.signal,
           });
 
-          items = (json?.data || []).map(mapItem);
+          items = mapItems(json?.data || []);
+          const referenceTrades = await fetchReferenceTrades(
+            items,
+            filters.region,
+            controller.signal
+          );
+          items = recalcMarketByTwelveMonths(items, referenceTrades);
           count = Number(json?.count || 0);
           pages = Number(json?.total_pages || 1);
         } else {
