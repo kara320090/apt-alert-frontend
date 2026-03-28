@@ -12,9 +12,7 @@ export default function ListingCard({ listing, isSelected }) {
   }
 
   const discountAmount = listing.market_avg - listing.price;
-  const tags = Array.isArray(listing.ai_tags) && listing.ai_tags.length > 0 
-    ? listing.ai_tags 
-    : ["강한 가격 메리트", "시세 대비 큰 할인", "역세권", "생활편의 양호"];
+  const tags = Array.isArray(listing.ai_tags) ? listing.ai_tags : [];
 
   return (
     <div className={`relative bg-white rounded-2xl border p-6 transition-all duration-300 group mb-4 cursor-pointer ${
@@ -69,13 +67,15 @@ export default function ListingCard({ listing, isSelected }) {
         <p className="text-[13px] font-medium text-slate-700 leading-relaxed mb-3">
           {listing.ai_summary || `AI가 시세 대비 하락폭을 분석했습니다. 현재 진입하기 좋은 가격대입니다.`}
         </p>
-        <div className="flex flex-wrap gap-1.5">
-          {tags.map((tag, idx) => (
-            <span key={idx} className="text-[11px] font-bold text-blue-600 bg-white border border-blue-100 px-2.5 py-1 rounded-md shadow-sm">
-              {tag}
-            </span>
-          ))}
-        </div>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {tags.map((tag, idx) => (
+              <span key={idx} className="text-[11px] font-bold text-blue-600 bg-white border border-blue-100 px-2.5 py-1 rounded-md shadow-sm">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
