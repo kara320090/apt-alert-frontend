@@ -15,6 +15,21 @@ import RegionReport from "../components/RegionReport";
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
+const MARKET_AVG_DEBUG_STORAGE_KEY = "apt-alert-debug-market-avg";
+
+function isMarketAvgDebugEnabled() {
+  if (typeof window === "undefined") {
+    return process.env.NODE_ENV !== "production";
+  }
+
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("debugMarketAvg") === "1") return true;
+    if (window.localStorage.getItem(MARKET_AVG_DEBUG_STORAGE_KEY) === "1") return true;
+  } catch {}
+
+  return process.env.NODE_ENV !== "production";
+}
 
 function toPositiveNumber(value) {
   const n = Number(value);
@@ -51,7 +66,7 @@ function mapItem(item) {
     marketAvgInfo.value > 0 ? Math.round((1 - price / marketAvgInfo.value) * 1000) / 10 : 0;
 
   if (
-    process.env.NODE_ENV !== "production" &&
+    isMarketAvgDebugEnabled() &&
     (marketAvgInfo.source.includes("3m") || marketAvgInfo.source === "none" || calculatedDiscountRate >= 35)
   ) {
     console.info("[market-avg-debug]", {
