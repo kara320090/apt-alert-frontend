@@ -10,7 +10,7 @@ import {
   classifyGrade,
 } from "../lib/filter";
 import { clearAiMeta, enrichWithPriceAiOnly } from "../lib/aiSummary";
-import { fetchAiListingTags, fetchFilter, fetchRegions, fetchListings } from "../lib/api";
+import { fetchAiListingTags, fetchRegions, fetchListings } from "../lib/api";
 import FilterBar from "../components/FilterBar";
 import ListingCard from "../components/ListingCard";
 import EmailForm from "../components/EmailForm";
@@ -21,15 +21,15 @@ import RegionReport from "../components/RegionReport";
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
-const REFERENCE_PER_PAGE = 500;
-const MAX_REFERENCE_REGIONS = 6;
+const LISTINGS_FETCH_PER_PAGE = 500;
+const MAX_LISTINGS_FETCH_PAGES = 20;
 
 function mapItems(items) {
   return (items || []).map(mapItem);
 }
 
-function recalcMarketByTwelveMonths(items, referenceTrades) {
-  const pool = [...(referenceTrades || []), ...(items || [])];
+function recalcMarketByTwelveMonths(items, referenceTrades = items) {
+  const pool = referenceTrades || [];
 
   return (items || []).map((item) => {
     const marketAvg = calcMarketAvg(pool, item) || 0;
@@ -45,34 +45,31 @@ function recalcMarketByTwelveMonths(items, referenceTrades) {
 }
 
 async function fetchReferenceTrades(pageItems, regionFilter, signal) {
-  if (!API_URL || pageItems.length === 0) return [];
+  if (!API_URL) return [];
 
-  const targets =
-    regionFilter && regionFilter !== "전체"
-      ? [regionFilter]
-      : Array.from(
-          new Set(pageItems.map((item) => item.region_name).filter(Boolean))
-        ).slice(0, MAX_REFERENCE_REGIONS);
+  const collected = [];
+  let currentPage = 1;
+  let totalPages = 1;
 
-  const chunks = await Promise.all(
-    targets.map(async (region) => {
-      try {
-        const json = await fetchListings({
-          region,
-          page: 1,
-          perPage: REFERENCE_PER_PAGE,
-          signal,
-        });
-        return mapItems(json?.data || []);
-      } catch (err) {
-        if (err?.name === "AbortError") throw err;
-        console.error("reference listings load failed:", err);
-        return [];
-      }
-    })
-  );
+  while (currentPage <= totalPages && currentPage <= MAX_LISTINGS_FETCH_PAGES) {
+    const json = await fetchListings({
+      region: regionFilter,
+      page: currentPage,
+      perPage: LISTINGS_FETCH_PER_PAGE,
+      signal,
+    });
 
-  return chunks.flat();
+    const mapped = mapItems(json?.data || []);
+    collected.push(...mapped);
+
+    const apiTotalPages = Number(json?.total_pages || 1);
+    totalPages = Number.isFinite(apiTotalPages) && apiTotalPages > 0 ? apiTotalPages : 1;
+
+    if (mapped.length === 0) break;
+    currentPage += 1;
+  }
+
+  return collected;
 }
 
 function mapItem(item) {
@@ -297,24 +294,22 @@ export default function Home() {
         let pages = 1;
 
         if (API_URL) {
-          const json = await fetchFilter({
-            region: filters.region,
-            grade: filters.grade,
-            minDiscount: filters.minDiscount,
-            page,
-            perPage,
-            signal: controller.signal,
-          });
-
-          items = mapItems(json?.data || []);
-          const referenceTrades = await fetchReferenceTrades(
-            items,
+          const baseTrades = await fetchReferenceTrades(
+            [],
             filters.region,
             controller.signal
           );
-          items = recalcMarketByTwelveMonths(items, referenceTrades);
-          count = Number(json?.count || 0);
-          pages = Number(json?.total_pages || 1);
+          const enriched = recalcMarketByTwelveMonths(baseTrades);
+          const locallyFiltered = applyFilter(enriched, {
+            region: filters.region,
+            grade: filters.grade,
+            minDiscount: filters.minDiscount,
+          });
+
+          count = locallyFiltered.length;
+          pages = Math.max(1, Math.ceil(count / perPage));
+          const start = (page - 1) * perPage;
+          items = locallyFiltered.slice(start, start + perPage);
         } else {
           await new Promise((r) => setTimeout(r, 250));
 
