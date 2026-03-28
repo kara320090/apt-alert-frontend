@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { dummyListings, regions as fallbackRegions } from "../data/dummy";
 import { enrichListings, applyFilter } from "../lib/filter";
-import { enrichWithPriceAiOnly } from "../lib/aiSummary";
+import { clearAiMeta, enrichWithPriceAiOnly } from "../lib/aiSummary";
 import { fetchAiListingTags, fetchFilter, fetchRegions } from "../lib/api";
 import FilterBar from "../components/FilterBar";
 import ListingCard from "../components/ListingCard";
@@ -14,6 +14,7 @@ import RegionReport from "../components/RegionReport";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
+const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
 
 function mapItem(item) {
   const properties = item?.properties || {};
@@ -115,6 +116,7 @@ function buildFilterSummary(filters) {
     filters.region === "전체" ? "전지역" : filters.region,
     filters.grade === "전체" ? "전체등급" : filters.grade,
     `할인 ${filters.minDiscount}%+`,
+    `${filters.perPage}개/페이지`,
     filters.aiEnabled ? "AI ON" : "AI OFF",
   ];
 }
@@ -128,7 +130,6 @@ export default function Home() {
   const [error, setError] = useState(null);
 
   const [page, setPage] = useState(1);
-  const [perPage] = useState(20);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
@@ -142,17 +143,21 @@ export default function Home() {
     region: "전체",
     grade: "전체",
     minDiscount: 5,
-    aiEnabled: false, // localStorage sync happens in useEffect below
+    perPage: 20,
+    aiEnabled: false,
   });
+  const perPage = filters.perPage;
 
-  // Sync AI toggle state from localStorage on mount (FilterBar also reads it,
-  // so we need page state to match to avoid showing AI=ON but loading without AI)
   useEffect(() => {
-    const savedAi = localStorage.getItem("apt-alert-ai-enabled") === "true";
-    if (savedAi) {
-      setFilters((prev) => ({ ...prev, aiEnabled: true }));
-    }
+    if (typeof window === "undefined") return;
+    const savedAi = localStorage.getItem(AI_ENABLED_STORAGE_KEY) === "true";
+    if (savedAi) setFilters((prev) => ({ ...prev, aiEnabled: true }));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(AI_ENABLED_STORAGE_KEY, String(filters.aiEnabled));
+  }, [filters.aiEnabled]);
 
   const resolvedSelectedListing = selectedListing || visibleListings[0] || null;
   const filterSummary = useMemo(() => buildFilterSummary(filters), [filters]);
@@ -191,19 +196,21 @@ export default function Home() {
 
   useEffect(() => {
     let ignore = false;
+    const controller = new AbortController();
 
     async function loadRegions() {
       if (!API_URL) return;
 
       try {
-        const json = await fetchRegions();
+        const json = await fetchRegions({ signal: controller.signal });
         const names = Array.isArray(json?.data) ? json.data : [];
-        // Only replace fallback if API returns at least as many regions — prevents
-        // a stale/partial backend response from shrinking the dropdown
-        if (!ignore && names.length >= fallbackRegions.length) {
-          setRegions(names);
+        if (!ignore && names.length > 0) {
+          const deduped = Array.from(new Set(names.filter(Boolean)));
+          const normalized = deduped.includes("전체") ? deduped : ["전체", ...deduped];
+          setRegions(normalized);
         }
       } catch (err) {
+        if (err?.name === "AbortError") return;
         console.error("regions load failed:", err);
       }
     }
@@ -212,11 +219,13 @@ export default function Home() {
 
     return () => {
       ignore = true;
+      controller.abort();
     };
   }, []);
 
   useEffect(() => {
     let ignore = false;
+    const controller = new AbortController();
 
     async function loadData() {
       setLoading(true);
@@ -234,6 +243,7 @@ export default function Home() {
             minDiscount: filters.minDiscount,
             page,
             perPage,
+            signal: controller.signal,
           });
 
           items = (json?.data || []).map(mapItem);
@@ -259,6 +269,7 @@ export default function Home() {
           setTotalPages(pages);
         }
       } catch (err) {
+        if (err?.name === "AbortError") return;
         console.error(err);
         if (!ignore) {
           setError(err?.message || "데이터를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
@@ -277,16 +288,17 @@ export default function Home() {
 
     return () => {
       ignore = true;
+      controller.abort();
     };
   }, [filters.region, filters.grade, filters.minDiscount, page, perPage]);
 
   useEffect(() => {
     let ignore = false;
+    const controller = new AbortController();
 
     async function enrichVisiblePage() {
       if (!filters.aiEnabled) {
-        // AI OFF: 카카오 API 없이 가격 기반 태그/요약만 생성 (무료, 즉시 반환)
-        setVisibleListings(enrichWithPriceAiOnly(rawListings, true));
+        setVisibleListings(clearAiMeta(rawListings));
         setAiLoading(false);
         return;
       }
@@ -300,14 +312,15 @@ export default function Home() {
       setAiLoading(true);
 
       try {
-        const json = await fetchAiListingTags(rawListings);
+        const json = await fetchAiListingTags(rawListings, { signal: controller.signal });
         if (!ignore) {
           setVisibleListings(json?.data || []);
         }
       } catch (err) {
+        if (err?.name === "AbortError") return;
         console.error(err);
         if (!ignore) {
-          setVisibleListings(enrichWithPriceAiOnly(rawListings, true));
+          setVisibleListings(enrichWithPriceAiOnly(rawListings));
         }
       } finally {
         if (!ignore) {
@@ -320,6 +333,7 @@ export default function Home() {
 
     return () => {
       ignore = true;
+      controller.abort();
     };
   }, [rawListings, filters.aiEnabled]);
 
@@ -348,6 +362,7 @@ export default function Home() {
       region: nextFilters.region,
       grade: nextFilters.grade,
       minDiscount: nextFilters.minDiscount,
+      perPage: nextFilters.perPage,
       aiEnabled: nextFilters.aiEnabled,
     });
     setPage(1);
@@ -545,7 +560,11 @@ export default function Home() {
                   </div>
 
                   <div className="flex flex-col gap-4">
-                    <EmailForm regions={regions} />
+                    <EmailForm
+                      regions={regions}
+                      initialRegion={filters.region}
+                      initialMinDiscount={filters.minDiscount}
+                    />
 
                     {loading && (
                       <div className="py-10 text-center text-sm font-bold text-gray-400 animate-pulse">

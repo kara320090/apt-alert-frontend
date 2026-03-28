@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL;
 
 export async function POST(request) {
   try {
@@ -6,7 +6,7 @@ export async function POST(request) {
 
     if (!API_URL) {
       return Response.json(
-        { error: "NEXT_PUBLIC_API_URL 환경변수가 없습니다." },
+        { error: "API_URL 환경변수가 없습니다." },
         { status: 500 }
       );
     }

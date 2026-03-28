@@ -11,6 +11,7 @@ export default function FilterBar({
     grade: "전체",
     minDiscount: 5,
     aiEnabled: false,
+    perPage: 20,
   },
 }) {
   const [region, setRegion] = useState(initialValue.region || "전체");
@@ -19,17 +20,17 @@ export default function FilterBar({
     typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 5
   );
   const [aiEnabled, setAiEnabled] = useState(Boolean(initialValue.aiEnabled));
+  const [perPage, setPerPage] = useState(
+    typeof initialValue.perPage === "number" ? initialValue.perPage : 20
+  );
 
   useEffect(() => {
-    const saved = localStorage.getItem("apt-alert-ai-enabled");
-    if (saved === "true") {
-      setAiEnabled(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("apt-alert-ai-enabled", String(aiEnabled));
-  }, [aiEnabled]);
+    setRegion(initialValue.region || "전체");
+    setGrade(initialValue.grade || "전체");
+    setMinDiscount(typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 5);
+    setAiEnabled(Boolean(initialValue.aiEnabled));
+    setPerPage(typeof initialValue.perPage === "number" ? initialValue.perPage : 20);
+  }, [initialValue]);
 
   function handleApply() {
     onFilter({
@@ -37,6 +38,7 @@ export default function FilterBar({
       grade,
       minDiscount,
       aiEnabled,
+      perPage,
     });
   }
 
@@ -135,6 +137,21 @@ export default function FilterBar({
             <span>40%</span>
           </div>
         </div>
+      </div>
+
+      <div className="mb-5">
+        <label className="block text-xs font-medium text-gray-500 mb-1.5">페이지당 매물 수</label>
+        <select
+          className="w-full md:w-56 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          value={perPage}
+          onChange={(e) => setPerPage(Number(e.target.value))}
+        >
+          {[20, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n}개
+            </option>
+          ))}
+        </select>
       </div>
 
       <button

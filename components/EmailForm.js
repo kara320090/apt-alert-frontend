@@ -1,14 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { subscribeAlert } from "../lib/api";
 
-export default function EmailForm({ regions = ["전체"] }) {
+export default function EmailForm({
+  regions = ["전체"],
+  initialRegion = "전체",
+  initialMinDiscount = 15,
+}) {
   const [email, setEmail] = useState("");
-  const [region, setRegion] = useState("전체");
-  const [minDiscount, setMinDiscount] = useState(15);
+  const [region, setRegion] = useState(initialRegion || "전체");
+  const [minDiscount, setMinDiscount] = useState(
+    typeof initialMinDiscount === "number" ? initialMinDiscount : 15
+  );
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setRegion(initialRegion || "전체");
+  }, [initialRegion]);
+
+  useEffect(() => {
+    if (typeof initialMinDiscount === "number") {
+      setMinDiscount(initialMinDiscount);
+    }
+  }, [initialMinDiscount]);
 
   async function handleSubmit() {
     const trimmedEmail = email.trim();
