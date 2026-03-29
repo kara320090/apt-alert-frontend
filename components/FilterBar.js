@@ -11,7 +11,7 @@ export default function FilterBar({
     grade: "전체",
     minDiscount: 0,
     aiEnabled: false,
-    perPage: 500,
+    perPage: 20,
   },
 }) {
   const [region, setRegion] = useState(initialValue.region || "전체");
@@ -21,7 +21,7 @@ export default function FilterBar({
   );
   const [aiEnabled, setAiEnabled] = useState(Boolean(initialValue.aiEnabled));
   const [perPage, setPerPage] = useState(
-    typeof initialValue.perPage === "number" ? initialValue.perPage : 500
+    typeof initialValue.perPage === "number" ? initialValue.perPage : 20
   );
 
   useEffect(() => {
@@ -29,7 +29,7 @@ export default function FilterBar({
     setGrade(initialValue.grade || "전체");
     setMinDiscount(typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 0);
     setAiEnabled(Boolean(initialValue.aiEnabled));
-    setPerPage(typeof initialValue.perPage === "number" ? initialValue.perPage : 500);
+    setPerPage(typeof initialValue.perPage === "number" ? initialValue.perPage : 20);
   }, [initialValue]);
 
   function handleApply() {

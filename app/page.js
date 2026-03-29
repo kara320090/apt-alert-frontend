@@ -147,7 +147,7 @@ export default function Home() {
     region: "전체",
     grade: "전체",
     minDiscount: 0,
-    perPage: 500,
+    perPage: 20,
     aiEnabled: false,
   });
   const perPage = filters.perPage;
