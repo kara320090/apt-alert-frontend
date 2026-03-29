@@ -18,7 +18,7 @@ export default function EmailForm({
   const [minDiscount, setMinDiscount] = useState(
     Number.isFinite(Number(initialMinDiscount)) ? Number(initialMinDiscount) : 10
   );
-  const [loading, setLoading] = useState(false);
+  const [loadingType, setLoadingType] = useState("");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("idle");
 
@@ -32,50 +32,69 @@ export default function EmailForm({
     );
   }, [initialMinDiscount]);
 
-  const handleSubmit = async (e) => {
+  const payload = {
+    email: email.trim(),
+    region: region || "전체",
+    min_discount: Number(minDiscount) || 0,
+  };
+
+  const runRequest = async (url, successMessageFallback) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data?.ok) {
+      throw new Error(data?.message || "요청에 실패했습니다.");
+    }
+
+    setMessageType("success");
+    setMessage(data?.message || successMessageFallback);
+  };
+
+  const handleSubscribe = async (e) => {
     e.preventDefault();
 
-    const trimmedEmail = email.trim();
-
-    if (!trimmedEmail) {
+    if (!payload.email) {
       setMessageType("error");
       setMessage("이메일을 입력해주세요.");
       return;
     }
 
-    const payload = {
-      email: trimmedEmail,
-      region: region || "전체",
-      min_discount: Number(minDiscount) || 0,
-    };
-
     try {
-      setLoading(true);
+      setLoadingType("subscribe");
       setMessage("");
-      setMessageType("idle");
-
-      const res = await fetch("/api/subscribe", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.message || "구독 등록에 실패했습니다.");
-      }
-
-      setMessageType("success");
-      setMessage(data?.message || "구독이 등록되었습니다.");
+      await runRequest("/api/subscribe", "구독이 등록되었습니다.");
       setEmail("");
     } catch (err) {
       setMessageType("error");
       setMessage(err?.message || "구독 등록 중 오류가 발생했습니다.");
     } finally {
-      setLoading(false);
+      setLoadingType("");
+    }
+  };
+
+  const handleUnsubscribe = async () => {
+    if (!payload.email) {
+      setMessageType("error");
+      setMessage("취소할 이메일을 입력해주세요.");
+      return;
+    }
+
+    try {
+      setLoadingType("unsubscribe");
+      setMessage("");
+      await runRequest("/api/unsubscribe", "구독이 취소되었습니다.");
+    } catch (err) {
+      setMessageType("error");
+      setMessage(err?.message || "구독 취소 중 오류가 발생했습니다.");
+    } finally {
+      setLoadingType("");
     }
   };
 
@@ -88,7 +107,7 @@ export default function EmailForm({
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <form onSubmit={handleSubscribe} className="flex flex-col gap-3">
         <div>
           <label className="block text-xs font-black text-slate-600 mb-1.5">
             이메일
@@ -99,7 +118,7 @@ export default function EmailForm({
             onChange={(e) => setEmail(e.target.value)}
             placeholder="example@email.com"
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-100"
-            disabled={loading}
+            disabled={!!loadingType}
           />
         </div>
 
@@ -111,7 +130,7 @@ export default function EmailForm({
             value={region}
             onChange={(e) => setRegion(e.target.value)}
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-100"
-            disabled={loading}
+            disabled={!!loadingType}
           >
             {normalizedRegions.map((item) => (
               <option key={item} value={item}>
@@ -133,17 +152,28 @@ export default function EmailForm({
             value={minDiscount}
             onChange={(e) => setMinDiscount(e.target.value)}
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-100"
-            disabled={loading}
+            disabled={!!loadingType}
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="mt-1 inline-flex items-center justify-center rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? "등록 중..." : "이메일 구독하기"}
-        </button>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="submit"
+            disabled={!!loadingType}
+            className="inline-flex items-center justify-center rounded-2xl bg-red-600 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingType === "subscribe" ? "신청 중..." : "구독 신청"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleUnsubscribe}
+            disabled={!!loadingType}
+            className="inline-flex items-center justify-center rounded-2xl bg-slate-700 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingType === "unsubscribe" ? "취소 중..." : "구독 취소"}
+          </button>
+        </div>
 
         {message ? (
           <div
