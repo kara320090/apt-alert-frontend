@@ -11,6 +11,20 @@ export default function ListingCard({ listing, isSelected }) {
     return `${Number(price || 0).toLocaleString()}만`;
   }
 
+  function getMarketAvgCaption() {
+    const count = Number(listing.market_avg_count || 0);
+    const months = Number(listing.market_avg_period_months || 12);
+    const method = String(listing.market_avg_method || "");
+
+    if (count <= 0) return null;
+
+    if (method === "same_apartment_last_12_months") {
+      return `같은 아파트 최근 ${months}개월 ${count}건 평균`;
+    }
+
+    return `비교 시세 산정 기준 ${count}건`;
+  }
+
   const discountAmount = Math.max(0, Number(listing.market_avg || 0) - Number(listing.price || 0));
   const discountRate = Number.isFinite(Number(listing.discount_rate))
     ? Number(listing.discount_rate)
@@ -19,6 +33,7 @@ export default function ListingCard({ listing, isSelected }) {
   const risk = listing.risk || null;
   const riskSignals = Array.isArray(risk?.signals) ? risk.signals : [];
   const trend = listing.price_trend || null;
+  const marketAvgCaption = getMarketAvgCaption();
 
   const riskColors = {
     위험: "bg-red-50 text-red-600 border-red-200",
@@ -32,17 +47,21 @@ export default function ListingCard({ listing, isSelected }) {
   const trendArrows = { 상승: "↑", 하락: "↓", 보합: "→" };
 
   return (
-    <div className={`relative bg-white rounded-2xl border p-6 transition-all duration-300 group mb-4 cursor-pointer ${
-      isSelected
-        ? "border-red-500 shadow-[0_8px_30px_-4px_rgba(220,38,38,0.15)] ring-2 ring-red-500/10"
-        : "border-slate-200/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] hover:-translate-y-1 hover:border-slate-300"
-    }`}>
-      
-      {/* 1. Header: Asset & Urgency */}
+    <div
+      className={`relative bg-white rounded-2xl border p-6 transition-all duration-300 group mb-4 cursor-pointer ${
+        isSelected
+          ? "border-red-500 shadow-[0_8px_30px_-4px_rgba(220,38,38,0.15)] ring-2 ring-red-500/10"
+          : "border-slate-200/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] hover:-translate-y-1 hover:border-slate-300"
+      }`}
+    >
       <div className="flex justify-between items-start mb-4">
         <div className="flex flex-col gap-1.5 w-2/3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-[10px] font-black px-2.5 py-1 rounded tracking-widest text-white shadow-sm ${isSuper ? "bg-red-600" : "bg-orange-500"}`}>
+            <span
+              className={`text-[10px] font-black px-2.5 py-1 rounded tracking-widest text-white shadow-sm ${
+                isSuper ? "bg-red-600" : "bg-orange-500"
+              }`}
+            >
               {listing.grade}
             </span>
             {risk && risk.level !== "낮음" && (
@@ -51,7 +70,11 @@ export default function ListingCard({ listing, isSelected }) {
               </span>
             )}
             <span className="text-xs font-bold text-gray-400">
-              시세 대비 <span className={isSuper ? "text-red-600" : "text-orange-500"}>{formatPrice(discountAmount)}</span> 저렴
+              시세 대비{" "}
+              <span className={isSuper ? "text-red-600" : "text-orange-500"}>
+                {formatPrice(discountAmount)}
+              </span>{" "}
+              저렴
             </span>
           </div>
           <h3 className="text-lg font-black text-gray-900 tracking-tight mt-1 group-hover:text-red-600 transition-colors truncate">
@@ -62,26 +85,40 @@ export default function ListingCard({ listing, isSelected }) {
           </p>
         </div>
 
-        {/* Scaled down discount percentage */}
         <div className="text-right flex flex-col items-end w-1/3">
-           <p className={`text-3xl font-black tracking-tighter ${isSuper ? "text-red-600" : "text-orange-500"}`}>
+          <p className={`text-3xl font-black tracking-tighter ${isSuper ? "text-red-600" : "text-orange-500"}`}>
             -{discountRate}%
           </p>
         </div>
       </div>
 
-      {/* 2. Price Anchor */}
       <div className="flex justify-end items-end pb-4 mb-4 border-b border-gray-100">
         <div className="text-right">
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">최종 급매가</p>
-          {/* Scaled down final price */}
           <p className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">
             {formatPrice(listing.price)}
           </p>
         </div>
       </div>
 
-      {/* 3. Price Trend */}
+      {Number(listing.market_avg || 0) > 0 && (
+        <div className="mb-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+              비교 시세
+            </span>
+            <span className="text-sm font-black text-slate-900">
+              {formatPrice(listing.market_avg)}
+            </span>
+          </div>
+          {marketAvgCaption && (
+            <p className="mt-1 text-[11px] font-medium text-slate-500">
+              {marketAvgCaption}
+            </p>
+          )}
+        </div>
+      )}
+
       {trend && (
         <div className="flex items-center justify-between mb-4 px-1">
           <span className={`text-xs font-black ${trendColors[trend.direction]}`}>
@@ -93,7 +130,6 @@ export default function ListingCard({ listing, isSelected }) {
         </div>
       )}
 
-      {/* 4. AI Intel Box — 태그 또는 요약이 있을 때만 표시 */}
       {(tags.length > 0 || listing.ai_summary) && (
         <div className="bg-[#f8faff] rounded-xl p-4 border border-blue-50/50">
           <div className="flex items-center gap-1.5 mb-2">
@@ -107,7 +143,10 @@ export default function ListingCard({ listing, isSelected }) {
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {tags.map((tag, idx) => (
-                <span key={idx} className="text-[11px] font-bold text-blue-600 bg-white border border-blue-100 px-2.5 py-1 rounded-md shadow-sm">
+                <span
+                  key={idx}
+                  className="text-[11px] font-bold text-blue-600 bg-white border border-blue-100 px-2.5 py-1 rounded-md shadow-sm"
+                >
                   {tag}
                 </span>
               ))}
@@ -116,15 +155,29 @@ export default function ListingCard({ listing, isSelected }) {
         </div>
       )}
 
-      {/* 5. Risk Signals (주의/위험만 표시) */}
       {risk && risk.level !== "낮음" && riskSignals.length > 0 && (
-        <div className={`mt-3 rounded-xl px-3 py-2 border ${risk.level === "위험" ? "bg-red-50 border-red-100" : "bg-yellow-50 border-yellow-100"}`}>
-          <p className={`text-[10px] font-black uppercase tracking-[0.14em] mb-1.5 ${risk.level === "위험" ? "text-red-600" : "text-yellow-600"}`}>
+        <div
+          className={`mt-3 rounded-xl px-3 py-2 border ${
+            risk.level === "위험" ? "bg-red-50 border-red-100" : "bg-yellow-50 border-yellow-100"
+          }`}
+        >
+          <p
+            className={`text-[10px] font-black uppercase tracking-[0.14em] mb-1.5 ${
+              risk.level === "위험" ? "text-red-600" : "text-yellow-600"
+            }`}
+          >
             ⚠ 위험 신호 (패턴 기반 경고)
           </p>
           <div className="flex flex-wrap gap-1.5">
             {riskSignals.map((signal) => (
-              <span key={signal} className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${risk.level === "위험" ? "bg-white text-red-600 border-red-200" : "bg-white text-yellow-600 border-yellow-200"}`}>
+              <span
+                key={signal}
+                className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                  risk.level === "위험"
+                    ? "bg-white text-red-600 border-red-200"
+                    : "bg-white text-yellow-600 border-yellow-200"
+                }`}
+              >
                 {signal}
               </span>
             ))}

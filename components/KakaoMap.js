@@ -160,6 +160,20 @@ function getDiscountAmount(item) {
   return Math.max(0, Number(item?.market_avg || 0) - Number(item?.price || 0));
 }
 
+function getMarketAvgCaption(item) {
+  const count = Number(item?.market_avg_count || 0);
+  const months = Number(item?.market_avg_period_months || 12);
+  const method = String(item?.market_avg_method || "");
+
+  if (count <= 0) return null;
+
+  if (method === "same_apartment_last_12_months") {
+    return `같은 아파트 최근 ${months}개월 ${count}건 평균`;
+  }
+
+  return `비교 시세 산정 기준 ${count}건`;
+}
+
 function makeMarkerImage(fill, size = 18) {
   if (typeof window === "undefined" || !window.kakao?.maps?.Size) return null;
 
@@ -265,10 +279,10 @@ function loadKakaoSdk() {
   return window.__kakaoSdkPromise;
 }
 
-export default function KakaoMap({ listings = [], selectedId = null, onSelectListing, selectedListing }) {
+export default function KakaoMap({ listings = [], selectedId = null, selectedListing = null, onSelectListing }) {
   const rootRef = useRef(null);
-  const mapPaneRef = useRef(null);
-  const roadPaneRef = useRef(null);
+  const mapElRef = useRef(null);
+  const roadviewElRef = useRef(null);
 
   const mapRef = useRef(null);
   const roadviewRef = useRef(null);
@@ -280,7 +294,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
   const pulseOverlayRef = useRef(null);
   const coordsByIdRef = useRef(new Map());
   const initializedRef = useRef(false);
-  const selectedIdRef = useRef(selectedId);
 
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
@@ -291,12 +304,8 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
 
   const resolvedSelectedListing = useMemo(
     () => selectedListing || listings.find((item) => item.id === selectedId) || null,
-    [listings, selectedId, selectedListing]
+    [selectedListing, listings, selectedId]
   );
-
-  useEffect(() => {
-    selectedIdRef.current = selectedId;
-  }, [selectedId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -306,25 +315,35 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         const kakao = await loadKakaoSdk();
         if (cancelled) return;
 
-        if (!mapPaneRef.current || !roadPaneRef.current) {
+        if (!mapElRef.current || !roadviewElRef.current) {
           throw new Error("지도 또는 로드뷰 DOM을 찾지 못했습니다.");
         }
 
         if (!initializedRef.current) {
           const center = new kakao.maps.LatLng(37.5665, 126.9780);
 
-          mapRef.current = new kakao.maps.Map(mapPaneRef.current, {
+          mapRef.current = new kakao.maps.Map(mapElRef.current, {
             center,
             level: 6,
           });
 
-          roadviewRef.current = new kakao.maps.Roadview(roadPaneRef.current);
+          roadviewRef.current = new kakao.maps.Roadview(roadviewElRef.current);
           roadviewClientRef.current = new kakao.maps.RoadviewClient();
+
           initializedRef.current = true;
         }
 
         setStatus("ready");
         setError("");
+
+        setTimeout(() => {
+          try {
+            mapRef.current?.relayout();
+          } catch {}
+          try {
+            roadviewRef.current?.relayout();
+          } catch {}
+        }, 80);
       } catch (err) {
         if (!cancelled) {
           setStatus("error");
@@ -334,35 +353,12 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     }
 
     init();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  useEffect(() => {
-    if (status !== "ready") return;
-    if (!rootRef.current) return;
-
-    const relayout = () => {
-      try {
-        mapRef.current?.relayout();
-      } catch {}
-      try {
-        roadviewRef.current?.relayout();
-      } catch {}
-    };
-
-    const observer = new ResizeObserver(() => {
-      setTimeout(relayout, 80);
-    });
-
-    observer.observe(rootRef.current);
-    setTimeout(relayout, 80);
-
-    return () => observer.disconnect();
-  }, [status, viewMode]);
-
-  // Marker drawing only when listing set changes
   useEffect(() => {
     if (status !== "ready") return;
     if (!window.kakao?.maps) return;
@@ -375,6 +371,16 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     markersRef.current = [];
     markerByIdRef.current = new Map();
 
+    if (selectionOverlayRef.current) {
+      selectionOverlayRef.current.setMap(null);
+      selectionOverlayRef.current = null;
+    }
+
+    if (pulseOverlayRef.current) {
+      pulseOverlayRef.current.setMap(null);
+      pulseOverlayRef.current = null;
+    }
+
     coordsByIdRef.current = new Map();
 
     if (!listings.length) {
@@ -382,8 +388,6 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       setSearchingCoords(false);
       return;
     }
-
-    let cancelled = false;
 
     const bounds = new kakao.maps.LatLngBounds();
     const places = kakao.maps.services ? new kakao.maps.services.Places() : null;
@@ -393,29 +397,26 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     let completed = 0;
     let pendingSearches = 0;
 
-    const maybeFitBounds = () => {
-      if (found > 0 && !selectedIdRef.current) {
-        try {
-          map.setBounds(bounds);
-          setTimeout(() => {
-            try {
-              map.relayout();
-            } catch {}
-          }, 80);
-        } catch {}
-      }
-    };
-
     const finalize = () => {
-      if (cancelled) return;
       completed += 1;
       setSearchingCoords(pendingSearches > 0);
 
       if (completed === listings.length) {
         setPointCount(found);
         setSearchingCoords(false);
-        maybeFitBounds();
-        updateMarkerSelection(markerByIdRef, selectedIdRef.current);
+
+        if (found > 0 && !selectedId) {
+          try {
+            map.setBounds(bounds);
+            setTimeout(() => {
+              try {
+                map.relayout();
+              } catch {}
+            }, 80);
+          } catch {}
+        }
+
+        updateMarkerSelection(markerByIdRef, selectedId);
       }
     };
 
@@ -438,34 +439,30 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       found += 1;
     };
 
-    const searchByKeyword = (listing, keyword) =>
-      new Promise((resolve) => {
-        pendingSearches += 1;
-        setSearchingCoords(true);
+    const searchQueue = [];
+    const runNext = () => {
+      if (!searchQueue.length) return;
+      if (pendingSearches >= MAX_CONCURRENT_PLACE_SEARCH) return;
 
-        places.keywordSearch(keyword, (result, searchStatus) => {
-          pendingSearches -= 1;
-          if (cancelled) {
-            resolve(null);
-            return;
-          }
+      const task = searchQueue.shift();
+      if (!task) return;
 
-          if (searchStatus !== kakao.maps.services.Status.OK) {
-            resolve(null);
-            return;
-          }
+      pendingSearches += 1;
+      setSearchingCoords(true);
 
-          const best = pickBestKeywordResult(result, getAptName(listing), getDongName(listing));
-          resolve(best);
-        });
+      task(() => {
+        pendingSearches -= 1;
+        runNext();
       });
+    };
 
-    const processListing = async (listing) => {
+    listings.forEach((listing) => {
       const lat = getLat(listing);
       const lng = getLng(listing);
 
       if (lat !== null && lng !== null) {
-        paintMarker(listing, new kakao.maps.LatLng(lat, lng));
+        const coords = new kakao.maps.LatLng(lat, lng);
+        paintMarker(listing, coords);
         finalize();
         return;
       }
@@ -473,7 +470,8 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       const cacheKey = makeCoordsCacheKey(listing);
       const cached = cache[cacheKey];
       if (isValidCacheEntry(cached)) {
-        paintMarker(listing, new kakao.maps.LatLng(cached.lat, cached.lng));
+        const coords = new kakao.maps.LatLng(cached.lat, cached.lng);
+        paintMarker(listing, coords);
         finalize();
         return;
       }
@@ -489,40 +487,34 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         return;
       }
 
-      const best = await searchByKeyword(listing, keyword);
-      if (best && !cancelled) {
-        const coords = new kakao.maps.LatLng(best.y, best.x);
-        paintMarker(listing, coords);
-        cache[cacheKey] = {
-          lat: Number(best.y),
-          lng: Number(best.x),
-          version: COORDS_CACHE_VERSION,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
-          confidence: "keyword-scored",
-          placeName: best.place_name || "",
-        };
-        writeCoordsCache(cache);
-      }
+      searchQueue.push((done) => {
+        places.keywordSearch(keyword, (results, searchStatus) => {
+          if (searchStatus === kakao.maps.services.Status.OK && Array.isArray(results) && results.length > 0) {
+            const best = pickBestKeywordResult(results, getAptName(listing), getDongName(listing));
+            if (best) {
+              const coords = new kakao.maps.LatLng(best.y, best.x);
+              paintMarker(listing, coords);
 
-      finalize();
-    };
+              cache[cacheKey] = {
+                lat: Number(best.y),
+                lng: Number(best.x),
+                version: COORDS_CACHE_VERSION,
+                createdAt: Date.now(),
+                expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
+                confidence: "keyword",
+              };
+              writeCoordsCache(cache);
+            }
+          }
 
-    const queue = [...listings];
-    const workerCount = Math.min(MAX_CONCURRENT_PLACE_SEARCH, queue.length);
-    const workers = Array.from({ length: workerCount }, async () => {
-      while (!cancelled && queue.length > 0) {
-        const listing = queue.shift();
-        if (!listing) return;
-        await processListing(listing);
-      }
+          finalize();
+          done();
+        });
+      });
+
+      runNext();
     });
-
-    Promise.all(workers).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [listings, status, onSelectListing]);
+  }, [listings, selectedId, status, onSelectListing]);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -662,37 +654,41 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     }
 
     setSearchingCoords(true);
-    places.keywordSearch(keyword, (result, searchStatus) => {
-      setSearchingCoords(false);
-      const best =
-        searchStatus === kakao.maps.services.Status.OK
-          ? pickBestKeywordResult(result, getAptName(resolvedSelectedListing), getDongName(resolvedSelectedListing))
-          : null;
 
-      if (best) {
-        const coords = new kakao.maps.LatLng(best.y, best.x);
-        coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
-        cache[cacheKey] = {
-          lat: Number(best.y),
-          lng: Number(best.x),
-          version: COORDS_CACHE_VERSION,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
-          confidence: "keyword-scored",
-          placeName: best.place_name || "",
-        };
-        writeCoordsCache(cache);
-        showSelection(coords);
-      } else {
-        setRoadviewMessage("선택한 매물의 좌표를 찾지 못했습니다.");
+    places.keywordSearch(keyword, (results, searchStatus) => {
+      setSearchingCoords(false);
+
+      if (searchStatus === kakao.maps.services.Status.OK && Array.isArray(results) && results.length > 0) {
+        const best = pickBestKeywordResult(results, getAptName(resolvedSelectedListing), getDongName(resolvedSelectedListing));
+        if (best) {
+          const coords = new kakao.maps.LatLng(best.y, best.x);
+          coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
+
+          cache[cacheKey] = {
+            lat: Number(best.y),
+            lng: Number(best.x),
+            version: COORDS_CACHE_VERSION,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
+            confidence: "keyword",
+          };
+          writeCoordsCache(cache);
+
+          showSelection(coords);
+          return;
+        }
       }
+
+      setRoadviewMessage("선택한 매물의 좌표를 찾지 못했습니다.");
     });
   }, [resolvedSelectedListing, status]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
+
     const styleId = "pulse-marker-style";
     if (document.getElementById(styleId)) return;
+
     const style = document.createElement("style");
     style.id = styleId;
     style.innerHTML = `
@@ -704,6 +700,39 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
     `;
     document.head.appendChild(style);
   }, []);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+
+    setTimeout(() => {
+      try {
+        mapRef.current?.relayout();
+      } catch {}
+      try {
+        roadviewRef.current?.relayout();
+      } catch {}
+    }, 100);
+  }, [viewMode, status]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!rootRef.current || status !== "ready") return;
+
+    const observer = new ResizeObserver(() => {
+      setTimeout(() => {
+        try {
+          mapRef.current?.relayout();
+        } catch {}
+        try {
+          roadviewRef.current?.relayout();
+        } catch {}
+      }, 80);
+    });
+
+    observer.observe(rootRef.current);
+
+    return () => observer.disconnect();
+  }, [status]);
 
   const showNoPointOverlay = status === "ready" && listings.length > 0 && pointCount === 0;
 
@@ -732,7 +761,7 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
         </div>
       )}
 
-      {resolvedSelectedListing && status === "ready" && (
+      {resolvedSelectedListing && (
         <div className="absolute top-6 left-6 z-30 bg-white/92 backdrop-blur border border-slate-200 rounded-2xl shadow-xl px-4 py-3 min-w-[260px] max-w-[320px]">
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">선택 매물</div>
           <div className="text-sm font-black text-slate-900 break-keep">{getAptName(resolvedSelectedListing) || "이름 없음"}</div>
@@ -758,6 +787,20 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
               <div className="text-slate-900 font-black mt-1">{resolvedSelectedListing?.floor || "-"}층</div>
             </div>
           </div>
+
+          {Number(resolvedSelectedListing?.market_avg || 0) > 0 && (
+            <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2">
+              <div className="text-slate-400 font-bold text-xs">비교 시세</div>
+              <div className="text-slate-900 font-black mt-1 text-sm">
+                {formatPriceText(resolvedSelectedListing?.market_avg)}
+              </div>
+              {getMarketAvgCaption(resolvedSelectedListing) && (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  {getMarketAvgCaption(resolvedSelectedListing)}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -791,10 +834,14 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
       <div className="absolute inset-0">
         <div
           className={`absolute inset-0 transition-all duration-300 ${
-            viewMode === "map" ? "w-full h-full opacity-100" : viewMode === "split" ? "w-1/2 h-full left-0 opacity-100" : "w-0 h-0 opacity-0 pointer-events-none"
+            viewMode === "map"
+              ? "w-full h-full opacity-100"
+              : viewMode === "split"
+              ? "w-1/2 h-full left-0 opacity-100"
+              : "w-0 h-0 opacity-0 pointer-events-none"
           }`}
         >
-          <div ref={mapPaneRef} className="w-full h-full" />
+          <div ref={mapElRef} className="w-full h-full" />
           {showNoPointOverlay && viewMode !== "roadview" && (
             <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
               <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
@@ -806,13 +853,17 @@ export default function KakaoMap({ listings = [], selectedId = null, onSelectLis
 
         <div
           className={`absolute inset-y-0 right-0 transition-all duration-300 ${
-            viewMode === "roadview" ? "w-full h-full opacity-100" : viewMode === "split" ? "w-1/2 h-full opacity-100" : "w-0 h-0 opacity-0 pointer-events-none"
+            viewMode === "roadview"
+              ? "w-full h-full opacity-100"
+              : viewMode === "split"
+              ? "w-1/2 h-full opacity-100"
+              : "w-0 h-0 opacity-0 pointer-events-none"
           }`}
         >
-          <div ref={roadPaneRef} className="w-full h-full" />
+          <div ref={roadviewElRef} className="w-full h-full" />
           {roadviewMessage && (viewMode === "roadview" || viewMode === "split") && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg text-center mx-6">
+              <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg">
                 {roadviewMessage}
               </p>
             </div>
