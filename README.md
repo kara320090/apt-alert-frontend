@@ -18,6 +18,8 @@ npm run dev
 - `API_URL` : (선택) Next API Route에서 사용할 서버 전용 백엔드 주소
 - `NEXT_PUBLIC_KAKAO_MAP_KEY` : 카카오맵 JavaScript 키
 - `KAKAO_REST_API_KEY` : AI 입지 태그용 카카오 로컬 REST 키
+- `GEMINI_API_KEY` : Gemini API 키 (지역 AI 요약)
+- `GEMINI_MODEL` : (선택) 기본값 `gemini-2.0-flash`
 
 ## 현재 기능
 

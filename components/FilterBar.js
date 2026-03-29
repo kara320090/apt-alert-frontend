@@ -10,7 +10,7 @@ export default function FilterBar({
     region: "전체",
     grade: "전체",
     minDiscount: 0,
-    aiEnabled: false,
+    aiEnabled: true,
     perPage: 20,
   },
 }) {
@@ -48,7 +48,7 @@ export default function FilterBar({
         <div>
           <h2 className="text-base font-semibold text-gray-800">급매물 검색 조건</h2>
           <p className="text-xs text-gray-400 mt-1">
-            AI 해석은 선택적으로 켜고 끌 수 있습니다.
+            AI 해석은 기본으로 켜져 있으며 필요하면 끌 수 있습니다.
           </p>
         </div>
 

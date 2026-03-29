@@ -165,14 +165,16 @@ export default function Home() {
     grade: "전체",
     minDiscount: 0,
     perPage: 20,
-    aiEnabled: false,
+    aiEnabled: true,
   });
   const perPage = filters.perPage;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const savedAi = localStorage.getItem(AI_ENABLED_STORAGE_KEY) === "true";
-    if (savedAi) setFilters((prev) => ({ ...prev, aiEnabled: true }));
+    const savedAi = localStorage.getItem(AI_ENABLED_STORAGE_KEY);
+    if (savedAi === "true" || savedAi === "false") {
+      setFilters((prev) => ({ ...prev, aiEnabled: savedAi === "true" }));
+    }
   }, []);
 
   useEffect(() => {

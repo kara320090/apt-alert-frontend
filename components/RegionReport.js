@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { buildRegionAiSummary, buildRegionReport } from "../lib/report";
+import { fetchRegionAiSummary } from "../lib/api";
 
 export default function RegionReport({
   listings,
@@ -22,6 +23,49 @@ export default function RegionReport({
   const aiSummary = useMemo(() => {
     return aiEnabled ? buildRegionAiSummary(report) : "";
   }, [report, aiEnabled]);
+
+  const [aiSummaryText, setAiSummaryText] = useState("");
+  const [aiSource, setAiSource] = useState("rule");
+
+  useEffect(() => {
+    if (!aiEnabled) {
+      setAiSummaryText("");
+      setAiSource("rule");
+      return;
+    }
+
+    const controller = new AbortController();
+    let ignore = false;
+
+    async function loadSummary() {
+      try {
+        const json = await fetchRegionAiSummary({
+          report,
+          selectedRegion,
+          signal: controller.signal,
+        });
+
+        if (!ignore) {
+          setAiSummaryText(String(json?.summary || ""));
+          setAiSource(String(json?.provider || "rule"));
+        }
+      } catch {
+        if (!ignore) {
+          setAiSummaryText(aiSummary);
+          setAiSource("rule");
+        }
+      }
+    }
+
+    loadSummary();
+
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
+  }, [aiEnabled, report, selectedRegion, aiSummary]);
+  const hasGeminiSupplement =
+    aiSource === "gemini" && aiSummaryText && aiSummaryText !== aiSummary;
 
   return (
     <div className="space-y-5">
@@ -65,8 +109,28 @@ export default function RegionReport({
 
       {aiEnabled && (
         <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
-          <p className="text-xs font-semibold text-blue-700 mb-2">AI 지역 해석</p>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-xs font-semibold text-blue-700">AI 지역 해석</p>
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black tracking-wide ${
+                aiSource === "gemini"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-slate-200 text-slate-600"
+              }`}
+            >
+              {aiSource === "gemini" ? "Powered by Gemini" : "Rule-based Fallback"}
+            </span>
+          </div>
           <p className="text-sm text-blue-900 leading-6">{aiSummary}</p>
+
+          {hasGeminiSupplement && (
+            <div className="mt-3 pt-3 border-t border-blue-200/70">
+              <p className="text-[11px] font-black tracking-wide text-emerald-700 mb-1.5">
+                Gemini 추가 해석
+              </p>
+              <p className="text-sm text-slate-800 leading-6">{aiSummaryText}</p>
+            </div>
+          )}
         </div>
       )}
 

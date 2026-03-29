@@ -14,6 +14,8 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 API_URL=http://localhost:8000
 NEXT_PUBLIC_KAKAO_MAP_KEY=your_kakao_javascript_key
 KAKAO_REST_API_KEY=your_kakao_rest_api_key
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.0-flash
 ```
 
 ## 2. 백엔드와 연결되는 엔드포인트
@@ -37,3 +39,4 @@ npm run dev
 - 급매 목록 조회는 `/filter`를 사용합니다.
 - 지역 목록은 `/regions`를 사용합니다.
 - AI 입지 태그는 `app/api/ai/listing-tags/route.js`와 `KAKAO_REST_API_KEY`가 필요합니다.
+- AI 지역 요약 Gemini 연동은 `app/api/ai/region-summary/route.js`와 `GEMINI_API_KEY`가 필요합니다.
