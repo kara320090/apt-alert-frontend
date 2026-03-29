@@ -1,36 +1,60 @@
-const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL;
-
-export async function POST(request) {
+export async function POST(req) {
   try {
-    const payload = await request.json();
+    const body = await req.json();
 
-    if (!API_URL) {
-      return Response.json(
-        { error: "API_URL 환경변수가 없습니다." },
-        { status: 500 }
+    const baseUrl = process.env.EMAIL_API_BASE_URL;
+    if (!baseUrl) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          message: "EMAIL_API_BASE_URL is not set",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
       );
     }
 
-    const res = await fetch(`${API_URL.replace(/\/$/, "")}/subscribe`, {
+    const res = await fetch(`${baseUrl}/subscribe`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
     });
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return Response.json(
-        { error: data?.detail || data?.error || "구독 처리 중 오류가 발생했어요." },
-        { status: res.status }
-      );
+    const text = await res.text();
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = {
+        ok: false,
+        message: text || "Invalid response from email backend",
+      };
     }
 
-    return Response.json(data);
+    return new Response(JSON.stringify(data), {
+      status: res.status,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
   } catch (err) {
-    console.error(err);
-    return Response.json(
-      { error: "구독 처리 중 오류가 발생했어요." },
-      { status: 500 }
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        message: `subscribe proxy failed: ${err.message}`,
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
     );
   }
 }
