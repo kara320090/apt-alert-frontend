@@ -107,10 +107,10 @@ export default function RegionReport({
         </div>
       </div>
 
-      {aiEnabled && (
-        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
-          <div className="flex items-center justify-between gap-3 mb-2">
-            <p className="text-xs font-semibold text-blue-700">AI 지역 해석</p>
+      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <p className="text-xs font-semibold text-blue-700">AI 지역 해석</p>
+          {aiEnabled ? (
             <span
               className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black tracking-wide ${
                 aiSource === "gemini"
@@ -120,19 +120,23 @@ export default function RegionReport({
             >
               {aiSource === "gemini" ? "Powered by Gemini" : "Rule-based Fallback"}
             </span>
-          </div>
-          <p className="text-sm text-blue-900 leading-6">{aiSummary}</p>
-
-          {hasGeminiSupplement && (
-            <div className="mt-3 pt-3 border-t border-blue-200/70">
-              <p className="text-[11px] font-black tracking-wide text-emerald-700 mb-1.5">
-                Gemini 추가 해석
-              </p>
-              <p className="text-sm text-slate-800 leading-6">{aiSummaryText}</p>
-            </div>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-slate-200 text-slate-600 px-2.5 py-1 text-[10px] font-black tracking-wide">
+              Rule-based
+            </span>
           )}
         </div>
-      )}
+        <p className="text-sm text-blue-900 leading-6">{aiSummary}</p>
+
+        {aiEnabled && hasGeminiSupplement && (
+          <div className="mt-3 pt-3 border-t border-blue-200/70">
+            <p className="text-[11px] font-black tracking-wide text-emerald-700 mb-1.5">
+              Gemini 추가 해석
+            </p>
+            <p className="text-sm text-slate-800 leading-6">{aiSummaryText}</p>
+          </div>
+        )}
+      </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
         <p className="text-sm font-semibold text-gray-900 mb-4">월별 변화</p>
