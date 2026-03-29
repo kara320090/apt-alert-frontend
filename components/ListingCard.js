@@ -11,16 +11,13 @@ export default function ListingCard({ listing, isSelected }) {
     return `${Number(price || 0).toLocaleString()}만`;
   }
 
-  function formatPercent(value) {
-    const safe = Math.max(0, Math.round(Number(value || 0) * 10) / 10);
-    if (safe === 0) return "0%";
-    return Number.isInteger(safe) ? `${safe}%` : `${safe.toFixed(1)}%`;
-  }
-
   const discountAmount = Math.max(0, Number(listing.market_avg || 0) - Number(listing.price || 0));
-  const discountRate = Number.isFinite(Number(listing.discount_rate))
-    ? Math.max(0, Number(listing.discount_rate))
+  const discountRateRaw = Number.isFinite(Number(listing.discount_rate))
+    ? Number(listing.discount_rate)
     : 0;
+  const discountRate = Math.max(0, discountRateRaw);
+  const dealDateLabel = listing.deal_date || "거래일 미상";
+  const tradeTypeLabel = listing.transaction_type || "거래유형 미상";
   const tags = Array.isArray(listing.ai_tags) ? listing.ai_tags : [];
   const risk = listing.risk || null;
   const riskSignals = Array.isArray(risk?.signals) ? risk.signals : [];
@@ -71,7 +68,7 @@ export default function ListingCard({ listing, isSelected }) {
         {/* Scaled down discount percentage */}
         <div className="text-right flex flex-col items-end w-1/3">
            <p className={`text-3xl font-black tracking-tighter ${isSuper ? "text-red-600" : "text-orange-500"}`}>
-            {discountRate > 0 ? `-${formatPercent(discountRate)}` : formatPercent(discountRate)}
+            -{discountRate}%
           </p>
         </div>
       </div>
@@ -79,10 +76,15 @@ export default function ListingCard({ listing, isSelected }) {
       {/* 2. Price Anchor */}
       <div className="flex justify-end items-end pb-4 mb-4 border-b border-gray-100">
         <div className="text-right">
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">최종 급매가</p>
-          {/* Scaled down final price */}
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">최근 실거래가</p>
           <p className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">
             {formatPrice(listing.price)}
+          </p>
+          <p className="mt-1 text-[11px] font-medium text-gray-500">
+            {dealDateLabel} · {tradeTypeLabel}
+          </p>
+          <p className="text-[11px] font-medium text-gray-400">
+            비교 기준 {listing.market_avg_count || 0}건 · 최근 12개월 동일면적 평균
           </p>
         </div>
       </div>
@@ -91,7 +93,7 @@ export default function ListingCard({ listing, isSelected }) {
       {trend && (
         <div className="flex items-center justify-between mb-4 px-1">
           <span className={`text-xs font-black ${trendColors[trend.direction]}`}>
-            {trendArrows[trend.direction]} 시세 {trend.direction} ({formatPercent(Math.abs(trend.trend_rate))}/월)
+            {trendArrows[trend.direction]} 시세 {trend.direction} ({Math.abs(trend.trend_rate)}%/월)
           </span>
           <span className="text-[11px] text-slate-400">
             3개월 후 예상 <span className="font-bold text-slate-600">{formatPrice(trend.forecast_3m)}</span>

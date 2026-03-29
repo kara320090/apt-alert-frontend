@@ -16,62 +16,20 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const LEFT_PANEL_STORAGE_KEY = "apt-alert-left-panel-collapsed-v2";
 const AI_ENABLED_STORAGE_KEY = "apt-alert-ai-enabled";
 
-function toFiniteNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function round1(value) {
-  return Math.round(Number(value || 0) * 10) / 10;
-}
-
-function resolveMarketAvg(item, properties) {
-  return (
-    toFiniteNumber(item?.market_avg) ??
-    toFiniteNumber(item?.marketAvg) ??
-    toFiniteNumber(properties?.market_avg) ??
-    toFiniteNumber(properties?.marketAvg) ??
-    0
-  );
-}
-
-function resolveDiscountRate(item, properties, price, marketAvg) {
-  const direct =
-    toFiniteNumber(item?.discount_rate) ??
-    toFiniteNumber(item?.discountRate) ??
-    toFiniteNumber(item?.discount_pct) ??
-    toFiniteNumber(item?.discountPct) ??
-    toFiniteNumber(properties?.discount_rate) ??
-    toFiniteNumber(properties?.discountRate) ??
-    null;
-
-  if (direct != null) {
-    return round1(Math.max(0, direct));
-  }
-
-  if (marketAvg > 0 && price > 0) {
-    return round1(Math.max(0, (1 - price / marketAvg) * 100));
-  }
-
-  return 0;
-}
-
 function mapItem(item) {
   const properties = item?.properties || {};
-  const price = toFiniteNumber(item?.price) ?? 0;
-  const marketAvg = resolveMarketAvg(item, properties);
-  const discountRate = resolveDiscountRate(item, properties, price, marketAvg);
+  const price = Number(item?.price ?? 0);
 
   return {
     id: item?.id,
     apt_seq: item?.apt_seq || properties?.apt_seq || null,
     apt_name: item?.apt_name || properties?.apt_name || "",
-    area_size: toFiniteNumber(item?.area_size ?? properties?.area_size) ?? 0,
+    area_size: Number(item?.area_size ?? properties?.area_size ?? 0),
     region_code: item?.region_code || properties?.region_code || "",
     region_name:
       item?.region_name ||
-      properties?.region_name ||
       item?.dong_name ||
+      properties?.region_name ||
       properties?.dong_name ||
       properties?.dong ||
       "",
@@ -82,18 +40,18 @@ function mapItem(item) {
       item?.region_name ||
       "",
     price,
-    floor: toFiniteNumber(item?.floor) ?? 0,
+    floor: Number(item?.floor ?? 0),
     deal_year: parseInt(String(item?.deal_date || "").split("-")?.[0] || "0", 10),
     deal_month: parseInt(String(item?.deal_date || "").split("-")?.[1] || "0", 10),
     cdeal_type: item?.is_cancelled ? "Y" : "",
-    market_avg: marketAvg,
-    market_avg_count: toFiniteNumber(item?.market_avg_count) ?? 0,
-    market_avg_period_months: toFiniteNumber(item?.market_avg_period_months) ?? 0,
-    market_avg_method: item?.market_avg_method || "",
-    discount_rate: discountRate,
+    market_avg: Number(item?.market_avg ?? properties?.market_avg ?? 0),
+    market_avg_count: Number(item?.market_avg_count ?? 0),
+    discount_rate: Number(item?.discount_rate ?? 0),
+    deal_date: item?.deal_date || "",
+    transaction_type: item?.transaction_type || "",
     grade: item?.grade || "일반",
-    lat: toFiniteNumber(item?.lat) ?? toFiniteNumber(properties?.lat),
-    lng: toFiniteNumber(item?.lng) ?? toFiniteNumber(properties?.lng),
+    lat: item?.lat ?? null,
+    lng: item?.lng ?? null,
     ai_tags: item?.ai_tags || [],
     ai_summary: item?.ai_summary || "",
     risk: item?.risk || null,
@@ -188,8 +146,8 @@ export default function Home() {
   const [filters, setFilters] = useState({
     region: "전체",
     grade: "전체",
-    minDiscount: 5,
-    perPage: 20,
+    minDiscount: 0,
+    perPage: 500,
     aiEnabled: false,
   });
   const perPage = filters.perPage;

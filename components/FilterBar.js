@@ -9,27 +9,27 @@ export default function FilterBar({
   initialValue = {
     region: "전체",
     grade: "전체",
-    minDiscount: 5,
+    minDiscount: 0,
     aiEnabled: false,
-    perPage: 20,
+    perPage: 500,
   },
 }) {
   const [region, setRegion] = useState(initialValue.region || "전체");
   const [grade, setGrade] = useState(initialValue.grade || "전체");
   const [minDiscount, setMinDiscount] = useState(
-    typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 5
+    typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 0
   );
   const [aiEnabled, setAiEnabled] = useState(Boolean(initialValue.aiEnabled));
   const [perPage, setPerPage] = useState(
-    typeof initialValue.perPage === "number" ? initialValue.perPage : 20
+    typeof initialValue.perPage === "number" ? initialValue.perPage : 500
   );
 
   useEffect(() => {
     setRegion(initialValue.region || "전체");
     setGrade(initialValue.grade || "전체");
-    setMinDiscount(typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 5);
+    setMinDiscount(typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 0);
     setAiEnabled(Boolean(initialValue.aiEnabled));
-    setPerPage(typeof initialValue.perPage === "number" ? initialValue.perPage : 20);
+    setPerPage(typeof initialValue.perPage === "number" ? initialValue.perPage : 500);
   }, [initialValue]);
 
   function handleApply() {
@@ -146,7 +146,7 @@ export default function FilterBar({
           value={perPage}
           onChange={(e) => setPerPage(Number(e.target.value))}
         >
-          {[20, 50, 100].map((n) => (
+          {[20, 50, 100, 500].map((n) => (
             <option key={n} value={n}>
               {n}개
             </option>
