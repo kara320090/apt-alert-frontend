@@ -59,6 +59,23 @@ function mapItem(item) {
   };
 }
 
+function toDateValue(value) {
+  const t = Date.parse(value || "");
+  return Number.isFinite(t) ? t : 0;
+}
+
+function sortListings(items = []) {
+  return [...items].sort((a, b) => {
+    const discountDiff = Number(b?.discount_rate || 0) - Number(a?.discount_rate || 0);
+    if (discountDiff !== 0) return discountDiff;
+
+    const dateDiff = toDateValue(b?.deal_date) - toDateValue(a?.deal_date);
+    if (dateDiff !== 0) return dateDiff;
+
+    return Number(a?.price || 0) - Number(b?.price || 0);
+  });
+}
+
 function Pagination({ currentPage, totalPages, onChange }) {
   if (totalPages <= 1) return null;
 
@@ -250,7 +267,7 @@ export default function Home() {
             signal: controller.signal,
           });
 
-          items = (json?.data || []).map(mapItem);
+          items = sortListings((json?.data || []).map(mapItem));
           count = Number(json?.count || 0);
           pages = Number(json?.total_pages || 1);
         } else {
@@ -264,7 +281,7 @@ export default function Home() {
 
           count = localFiltered.length;
           pages = Math.max(1, Math.ceil(count / perPage));
-          items = localFiltered.slice((page - 1) * perPage, page * perPage);
+          items = sortListings(localFiltered).slice((page - 1) * perPage, page * perPage);
         }
 
         if (!ignore) {
@@ -302,7 +319,7 @@ export default function Home() {
 
     async function enrichVisiblePage() {
       if (!filters.aiEnabled) {
-        setVisibleListings(clearAiMeta(rawListings));
+        setVisibleListings(sortListings(clearAiMeta(rawListings)));
         setAiLoading(false);
         return;
       }
@@ -318,13 +335,19 @@ export default function Home() {
       try {
         const json = await fetchAiListingTags(rawListings, { signal: controller.signal });
         if (!ignore) {
-          setVisibleListings(json?.data || []);
+          const aiRows = Array.isArray(json?.data) ? json.data : [];
+          const aiMap = new Map(aiRows.map((row) => [row.id, row]));
+          const merged = rawListings.map((item) => {
+            const ai = aiMap.get(item.id);
+            return ai ? { ...item, ...ai } : item;
+          });
+          setVisibleListings(sortListings(merged));
         }
       } catch (err) {
         if (err?.name === "AbortError") return;
         console.error(err);
         if (!ignore) {
-          setVisibleListings(enrichWithPriceAiOnly(rawListings));
+          setVisibleListings(sortListings(enrichWithPriceAiOnly(rawListings)));
         }
       } finally {
         if (!ignore) {
@@ -361,17 +384,20 @@ export default function Home() {
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [resolvedSelectedListing?.id, activeTab]);
 
-  const handleFilterSubmit = useCallback((nextFilters) => {
-    setFilters({
-      region: nextFilters.region,
-      grade: nextFilters.grade,
-      minDiscount: nextFilters.minDiscount,
-      perPage: nextFilters.perPage,
-      aiEnabled: nextFilters.aiEnabled,
-    });
-    setPage(1);
-    if (isMobile) setMobilePanelOpen(false);
-  }, [isMobile]);
+  const handleFilterSubmit = useCallback(
+    (nextFilters) => {
+      setFilters({
+        region: nextFilters.region,
+        grade: nextFilters.grade,
+        minDiscount: nextFilters.minDiscount,
+        perPage: nextFilters.perPage,
+        aiEnabled: nextFilters.aiEnabled,
+      });
+      setPage(1);
+      if (isMobile) setMobilePanelOpen(false);
+    },
+    [isMobile]
+  );
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -399,8 +425,14 @@ export default function Home() {
   const closeMobilePanel = useCallback(() => setMobilePanelOpen(false), []);
 
   const panelClasses = isMobile
-    ? `absolute inset-y-0 left-0 z-40 w-[88vw] max-w-[420px] bg-white border-r border-gray-200 shadow-2xl transform transition-transform duration-300 ${mobilePanelOpen ? "translate-x-0" : "-translate-x-full"}`
-    : `h-full flex flex-col border-r border-gray-200 z-10 shadow-2xl relative bg-white transition-[width,min-width,max-width] duration-300 ease-out ${desktopCollapsed ? "w-[92px] min-w-[92px] max-w-[92px]" : "w-full md:w-[34%] lg:w-[30%] min-w-[320px] max-w-[420px]"}`;
+    ? `absolute inset-y-0 left-0 z-40 w-[88vw] max-w-[420px] bg-white border-r border-gray-200 shadow-2xl transform transition-transform duration-300 ${
+        mobilePanelOpen ? "translate-x-0" : "-translate-x-full"
+      }`
+    : `h-full flex flex-col border-r border-gray-200 z-10 shadow-2xl relative bg-white transition-[width,min-width,max-width] duration-300 ease-out ${
+        desktopCollapsed
+          ? "w-[92px] min-w-[92px] max-w-[92px]"
+          : "w-full md:w-[34%] lg:w-[30%] min-w-[320px] max-w-[420px]"
+      }`;
 
   return (
     <main className="h-screen w-full flex overflow-hidden bg-white text-gray-900 relative">
@@ -436,7 +468,11 @@ export default function Home() {
       )}
 
       <div className={panelClasses}>
-        <header className={`border-b border-gray-100 bg-white shrink-0 flex items-center justify-between transition-all duration-300 ${desktopCollapsed ? "px-3 py-4" : "px-8 py-5"}`}>
+        <header
+          className={`border-b border-gray-100 bg-white shrink-0 flex items-center justify-between transition-all duration-300 ${
+            desktopCollapsed ? "px-3 py-4" : "px-8 py-5"
+          }`}
+        >
           {desktopCollapsed ? (
             <div className="w-full flex flex-col items-center gap-3">
               <button
@@ -484,7 +520,10 @@ export default function Home() {
                 <div className="text-sm font-black text-red-600">{total}</div>
                 <div className="w-full flex flex-col gap-1.5 mt-1">
                   {filterSummary.map((item) => (
-                    <div key={item} className="mx-auto max-w-[74px] text-center text-[10px] font-bold text-slate-600 bg-slate-100 rounded-full px-2 py-1 leading-tight break-keep">
+                    <div
+                      key={item}
+                      className="mx-auto max-w-[74px] text-center text-[10px] font-bold text-slate-600 bg-slate-100 rounded-full px-2 py-1 leading-tight break-keep"
+                    >
                       {item}
                     </div>
                   ))}
@@ -577,7 +616,9 @@ export default function Home() {
                     )}
 
                     {error && (
-                      <div className="py-10 text-center text-sm font-bold text-red-400">{error}</div>
+                      <div className="py-10 text-center text-sm font-bold text-red-400">
+                        {error}
+                      </div>
                     )}
 
                     {!loading && !error && visibleListings.length === 0 && (
