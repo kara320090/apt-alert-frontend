@@ -1,63 +1,246 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const KAKAO_MAP_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
+const COORDS_CACHE_KEY = "apt-alert-coords-cache-v4";
+const COORDS_CACHE_VERSION = 2;
+const COORDS_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+const MAX_CONCURRENT_PLACE_SEARCH = 4;
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+function isFiniteNumber(value) {
+  return Number.isFinite(Number(value));
 }
 
-function loadKakaoMapSdk() {
-  return new Promise((resolve, reject) => {
-    if (typeof window === "undefined") {
-      reject(new Error("브라우저 환경이 아닙니다."));
-      return;
-    }
+function isValidCacheEntry(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  if (entry.version !== COORDS_CACHE_VERSION) return false;
+  if (!isFiniteNumber(entry.lat) || !isFiniteNumber(entry.lng)) return false;
+  if (!isFiniteNumber(entry.expiresAt)) return false;
+  return Number(entry.expiresAt) > Date.now();
+}
 
-    if (!KAKAO_MAP_KEY) {
-      reject(new Error("NEXT_PUBLIC_KAKAO_MAP_KEY가 설정되지 않았습니다."));
-      return;
-    }
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[()\[\].,]/g, "");
+}
 
-    if (window.kakao?.maps?.services) {
-      window.kakao.maps.load(() => resolve(window.kakao));
-      return;
-    }
+function readCoordsCache() {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(COORDS_CACHE_KEY) || "{}");
+    if (!raw || typeof raw !== "object") return {};
 
-    const existingScript = document.querySelector('script[data-kakao-map-sdk="true"]');
-
-    const handleLoad = () => {
-      if (!window.kakao?.maps) {
-        reject(new Error("카카오맵 SDK는 로드됐지만 kakao.maps를 찾지 못했습니다."));
-        return;
+    const now = Date.now();
+    const filtered = {};
+    let dirty = false;
+    Object.entries(raw).forEach(([key, value]) => {
+      if (isValidCacheEntry(value)) {
+        filtered[key] = value;
+      } else if (
+        value &&
+        typeof value === "object" &&
+        isFiniteNumber(value.lat) &&
+        isFiniteNumber(value.lng)
+      ) {
+        filtered[key] = {
+          lat: Number(value.lat),
+          lng: Number(value.lng),
+          version: COORDS_CACHE_VERSION,
+          createdAt: now,
+          expiresAt: now + COORDS_CACHE_TTL_MS,
+          confidence: "legacy",
+        };
+        dirty = true;
+      } else {
+        dirty = true;
       }
+    });
 
-      window.kakao.maps.load(() => {
-        if (!window.kakao?.maps?.services) {
-          reject(new Error("카카오맵 services 라이브러리를 찾지 못했습니다."));
-          return;
-        }
+    if (dirty) {
+      try {
+        localStorage.setItem(COORDS_CACHE_KEY, JSON.stringify(filtered));
+      } catch {}
+    }
+
+    return filtered;
+  } catch {
+    return {};
+  }
+}
+
+function writeCoordsCache(cache) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(COORDS_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+}
+
+function getAptName(item) {
+  return item?.apt_name || item?.properties?.apt_name || "";
+}
+
+function getDongName(item) {
+  return item?.dong_name || item?.region_name || item?.properties?.dong || "";
+}
+
+function getLat(item) {
+  const v = item?.lat ?? item?.properties?.lat;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getLng(item) {
+  const v = item?.lng ?? item?.properties?.lng;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function makeCoordsCacheKey(item) {
+  const regionCode = item?.region_code || item?.properties?.region_code || "";
+  return `${regionCode}|${getDongName(item)}|${getAptName(item)}`.trim();
+}
+
+function scoreKeywordResult(result, aptName, dongName) {
+  const aptNorm = normalizeText(aptName);
+  const dongNorm = normalizeText(dongName);
+  const placeNorm = normalizeText(result?.place_name);
+  const addressNorm = normalizeText(result?.address_name || result?.road_address_name);
+
+  let score = 0;
+  if (aptNorm && placeNorm.includes(aptNorm)) score += 3;
+  if (dongNorm && (addressNorm.includes(dongNorm) || placeNorm.includes(dongNorm))) score += 2;
+
+  const category = String(result?.category_name || "").toLowerCase();
+  if (category.includes("부동산") || category.includes("중개")) score -= 2;
+  if (category.includes("아파트") || category.includes("주거")) score += 1;
+
+  if (isFiniteNumber(result?.distance)) {
+    const distance = Number(result.distance);
+    if (distance <= 1000) score += 1;
+  }
+
+  return score;
+}
+
+function pickBestKeywordResult(results, aptName, dongName) {
+  const list = Array.isArray(results) ? results : [];
+  if (list.length === 0) return null;
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  list.forEach((result) => {
+    const score = scoreKeywordResult(result, aptName, dongName);
+    if (score > bestScore) {
+      best = result;
+      bestScore = score;
+    }
+  });
+
+  if (!best || bestScore < 2) {
+    return null;
+  }
+
+  return best;
+}
+
+function formatPriceText(value) {
+  const price = Number(value || 0);
+  const uk = Math.floor(price / 10000);
+  const man = price % 10000;
+  if (uk > 0 && man > 0) return `${uk}억 ${man.toLocaleString()}만`;
+  if (uk > 0) return `${uk}억`;
+  return `${price.toLocaleString()}만`;
+}
+
+function getDiscountAmount(item) {
+  return Math.max(0, Number(item?.market_avg || 0) - Number(item?.price || 0));
+}
+
+function makeMarkerImage(fill, size = 18) {
+  if (typeof window === "undefined" || !window.kakao?.maps?.Size) return null;
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7" fill="${fill}" stroke="#ffffff" stroke-width="3" />
+    </svg>
+  `.trim();
+
+  const encoded = encodeURIComponent(svg)
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+
+  return new window.kakao.maps.MarkerImage(
+    `data:image/svg+xml;charset=UTF-8,${encoded}`,
+    new window.kakao.maps.Size(size, size)
+  );
+}
+
+function updateMarkerSelection(markerByIdRef, selectedId) {
+  if (typeof window === "undefined" || !window.kakao?.maps) return;
+
+  const normalImage = makeMarkerImage("#334155", 18);
+  const selectedImage = makeMarkerImage("#dc2626", 26);
+
+  markerByIdRef.current.forEach((marker, id) => {
+    try {
+      marker.setImage(id === selectedId ? selectedImage : normalImage);
+      marker.setZIndex(id === selectedId ? 10 : 1);
+    } catch {}
+  });
+}
+
+function loadKakaoSdk() {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("window is undefined"));
+  }
+
+  if (!KAKAO_MAP_KEY) {
+    return Promise.reject(new Error("NEXT_PUBLIC_KAKAO_MAP_KEY가 없습니다."));
+  }
+
+  if (window.kakao?.maps?.Map) {
+    return Promise.resolve(window.kakao);
+  }
+
+  if (window.__kakaoSdkPromise) {
+    return window.__kakaoSdkPromise;
+  }
+
+  window.__kakaoSdkPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-kakao-map="true"]');
+
+    const finishLoad = () => {
+      if (window.kakao?.maps?.Map) {
         resolve(window.kakao);
-      });
-    };
-
-    const handleError = () => {
-      reject(new Error("카카오맵 SDK 스크립트 로드에 실패했습니다."));
-    };
-
-    if (existingScript) {
-      if (window.kakao?.maps) {
-        handleLoad();
         return;
       }
-      existingScript.addEventListener("load", handleLoad, { once: true });
-      existingScript.addEventListener("error", handleError, { once: true });
+
+      if (window.kakao?.maps?.load) {
+        window.kakao.maps.load(() => {
+          if (window.kakao?.maps?.Map) {
+            resolve(window.kakao);
+          } else {
+            reject(new Error("카카오맵 SDK 초기화에 실패했습니다."));
+          }
+        });
+        return;
+      }
+
+      reject(new Error("카카오맵 SDK를 찾지 못했습니다."));
+    };
+
+    if (existing) {
+      existing.addEventListener("load", finishLoad, { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("카카오맵 SDK 스크립트 로드 실패")),
+        { once: true }
+      );
       return;
     }
 
@@ -65,407 +248,574 @@ function loadKakaoMapSdk() {
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_MAP_KEY}&autoload=false&libraries=services`;
     script.async = true;
     script.defer = true;
-    script.dataset.kakaoMapSdk = "true";
-    script.addEventListener("load", handleLoad, { once: true });
-    script.addEventListener("error", handleError, { once: true });
+    script.dataset.kakaoMap = "true";
+
+    script.onload = finishLoad;
+    script.onerror = () => reject(new Error("카카오맵 SDK 스크립트 로드 실패"));
 
     document.head.appendChild(script);
+
+    setTimeout(() => {
+      if (window.kakao?.maps?.Map) {
+        resolve(window.kakao);
+      }
+    }, 3000);
   });
+
+  return window.__kakaoSdkPromise;
 }
 
-export default function KakaoMap({
-  listing,
-  onClose,
-  embedded = false,
-  contentHeightClass = "h-[520px]",
-}) {
+export default function KakaoMap({ listings = [], selectedId = null, onSelectListing, selectedListing }) {
+  const rootRef = useRef(null);
+  const mapPaneRef = useRef(null);
+  const roadPaneRef = useRef(null);
+
   const mapRef = useRef(null);
   const roadviewRef = useRef(null);
-
-  const mapInstanceRef = useRef(null);
-  const roadviewInstanceRef = useRef(null);
   const roadviewClientRef = useRef(null);
 
-  const propertyMarkerRef = useRef(null);
-  const selectedMarkerRef = useRef(null);
-  const infoWindowRef = useRef(null);
-  const clickHandlerRef = useRef(null);
+  const markersRef = useRef([]);
+  const markerByIdRef = useRef(new Map());
+  const selectionOverlayRef = useRef(null);
+  const pulseOverlayRef = useRef(null);
+  const coordsByIdRef = useRef(new Map());
+  const initializedRef = useRef(false);
+  const selectedIdRef = useRef(selectedId);
 
-  const propertyPositionRef = useRef(null);
-  const selectedRoadviewPositionRef = useRef(null);
-  const panoIdRef = useRef(null);
-  const selectingRoadviewRef = useRef(false);
+  const [status, setStatus] = useState("loading");
+  const [error, setError] = useState("");
+  const [pointCount, setPointCount] = useState(0);
+  const [viewMode, setViewMode] = useState("split");
+  const [roadviewMessage, setRoadviewMessage] = useState("매물을 선택하면 스트리트뷰를 함께 보여드립니다.");
+  const [searchingCoords, setSearchingCoords] = useState(false);
 
-  const [activeTab, setActiveTab] = useState("map");
-  const [mapStatus, setMapStatus] = useState("loading");
-  const [mapMessage, setMapMessage] = useState("지도를 불러오는 중입니다...");
-  const [roadviewStatus, setRoadviewStatus] = useState("idle");
-  const [roadviewMessage, setRoadviewMessage] = useState("지도에서 위치를 선택하거나 매물 위치 로드뷰를 눌러주세요.");
-  const [isSelectingRoadview, setIsSelectingRoadview] = useState(false);
+  const resolvedSelectedListing = useMemo(
+    () => selectedListing || listings.find((item) => item.id === selectedId) || null,
+    [listings, selectedId, selectedListing]
+  );
 
   useEffect(() => {
-    selectingRoadviewRef.current = isSelectingRoadview;
-  }, [isSelectingRoadview]);
-
-  const openRoadviewAt = (position, options = {}) => {
-    const { switchTab = true, selectionSource = "clicked" } = options;
-    const kakao = window.kakao;
-    const map = mapInstanceRef.current;
-    const roadview = roadviewInstanceRef.current;
-    const roadviewClient = roadviewClientRef.current;
-
-    if (!kakao?.maps || !map || !roadview || !roadviewClient || !position) {
-      setRoadviewStatus("error");
-      setRoadviewMessage("로드뷰를 초기화하지 못했습니다.");
-      return;
-    }
-
-    setRoadviewStatus("loading");
-    setRoadviewMessage("로드뷰를 찾는 중입니다...");
-
-    roadviewClient.getNearestPanoId(position, 80, (panoId) => {
-      if (!panoId) {
-        setRoadviewStatus("empty");
-        setRoadviewMessage("선택한 위치 근처에는 로드뷰 데이터가 없습니다. 다른 위치를 클릭해보세요.");
-        if (selectionSource === "clicked") {
-          setMapMessage("선택한 위치 근처에는 로드뷰 데이터가 없습니다. 다른 위치를 클릭해보세요.");
-        }
-        return;
-      }
-
-      panoIdRef.current = panoId;
-      selectedRoadviewPositionRef.current = position;
-
-      if (!selectedMarkerRef.current) {
-        selectedMarkerRef.current = new kakao.maps.Marker({
-          map,
-          position,
-        });
-      } else {
-        selectedMarkerRef.current.setMap(map);
-        selectedMarkerRef.current.setPosition(position);
-      }
-
-      roadview.setPanoId(panoId, position);
-
-      setRoadviewStatus("ready");
-      setRoadviewMessage("");
-      setMapMessage("");
-
-      if (switchTab) {
-        setActiveTab("roadview");
-      }
-
-      setIsSelectingRoadview(false);
-    });
-  };
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function initMapAndRoadview() {
+    async function init() {
       try {
-        setActiveTab("map");
-        setMapStatus("loading");
-        setMapMessage("지도를 불러오는 중입니다...");
-        setRoadviewStatus("idle");
-        setRoadviewMessage("지도에서 위치를 선택하거나 매물 위치 로드뷰를 눌러주세요.");
-        setIsSelectingRoadview(false);
-
-        const kakao = await loadKakaoMapSdk();
-        if (cancelled || !mapRef.current || !roadviewRef.current) return;
-
-        const defaultCenter = new kakao.maps.LatLng(37.5665, 126.9780);
-
-        const map = new kakao.maps.Map(mapRef.current, {
-          center: defaultCenter,
-          level: 3,
-        });
-
-        const roadview = new kakao.maps.Roadview(roadviewRef.current);
-        const roadviewClient = new kakao.maps.RoadviewClient();
-
-        mapInstanceRef.current = map;
-        roadviewInstanceRef.current = roadview;
-        roadviewClientRef.current = roadviewClient;
-
-        const clickHandler = (mouseEvent) => {
-          if (!selectingRoadviewRef.current) return;
-          const clickedPosition = mouseEvent.latLng;
-          openRoadviewAt(clickedPosition, {
-            switchTab: true,
-            selectionSource: "clicked",
-          });
-        };
-
-        kakao.maps.event.addListener(map, "click", clickHandler);
-        clickHandlerRef.current = clickHandler;
-
-        const keyword = `${listing.region_name} ${listing.apt_name}`.trim();
-        const places = new kakao.maps.services.Places();
-
-        places.keywordSearch(keyword, (data, searchStatus) => {
-          if (cancelled) return;
-
-          if (
-            searchStatus !== kakao.maps.services.Status.OK ||
-            !Array.isArray(data) ||
-            data.length === 0
-          ) {
-            setMapStatus("error");
-            setMapMessage("해당 매물 위치를 지도에서 찾지 못했습니다.");
-            return;
-          }
-
-          const place = data[0];
-          const lat = Number(place.y);
-          const lng = Number(place.x);
-          const position = new kakao.maps.LatLng(lat, lng);
-
-          propertyPositionRef.current = position;
-          map.setCenter(position);
-
-          const propertyMarker = new kakao.maps.Marker({
-            map,
-            position,
-          });
-          propertyMarkerRef.current = propertyMarker;
-
-          const safeAptName = escapeHtml(listing.apt_name);
-          const safeRegionName = escapeHtml(listing.region_name);
-
-          const infoWindow = new kakao.maps.InfoWindow({
-            content: `
-              <div style="padding:10px 12px; min-width:180px; line-height:1.5;">
-                <div style="font-weight:700; color:#111827;">${safeAptName}</div>
-                <div style="font-size:12px; color:#6B7280; margin-top:4px;">${safeRegionName}</div>
-              </div>
-            `,
-          });
-
-          infoWindow.open(map, propertyMarker);
-          infoWindowRef.current = infoWindow;
-
-          setMapStatus("ready");
-          setMapMessage("");
-        });
-      } catch (error) {
+        const kakao = await loadKakaoSdk();
         if (cancelled) return;
-        setMapStatus("error");
-        setMapMessage(error.message || "카카오 지도를 불러오지 못했습니다.");
-        setRoadviewStatus("error");
-        setRoadviewMessage(error.message || "카카오 로드뷰를 불러오지 못했습니다.");
+
+        if (!mapPaneRef.current || !roadPaneRef.current) {
+          throw new Error("지도 또는 로드뷰 DOM을 찾지 못했습니다.");
+        }
+
+        if (!initializedRef.current) {
+          const center = new kakao.maps.LatLng(37.5665, 126.9780);
+
+          mapRef.current = new kakao.maps.Map(mapPaneRef.current, {
+            center,
+            level: 6,
+          });
+
+          roadviewRef.current = new kakao.maps.Roadview(roadPaneRef.current);
+          roadviewClientRef.current = new kakao.maps.RoadviewClient();
+          initializedRef.current = true;
+        }
+
+        setStatus("ready");
+        setError("");
+      } catch (err) {
+        if (!cancelled) {
+          setStatus("error");
+          setError(err?.message || "지도 초기화에 실패했습니다.");
+        }
       }
     }
 
-    initMapAndRoadview();
-
+    init();
     return () => {
       cancelled = true;
-
-      const kakao = window.kakao;
-      const map = mapInstanceRef.current;
-
-      if (kakao?.maps && map && clickHandlerRef.current) {
-        kakao.maps.event.removeListener(map, "click", clickHandlerRef.current);
-      }
-
-      mapInstanceRef.current = null;
-      roadviewInstanceRef.current = null;
-      roadviewClientRef.current = null;
-      propertyMarkerRef.current = null;
-      selectedMarkerRef.current = null;
-      infoWindowRef.current = null;
-      clickHandlerRef.current = null;
-      propertyPositionRef.current = null;
-      selectedRoadviewPositionRef.current = null;
-      panoIdRef.current = null;
-      selectingRoadviewRef.current = false;
     };
-  }, [listing]);
+  }, []);
 
   useEffect(() => {
-    const kakao = window.kakao;
-    const map = mapInstanceRef.current;
+    if (status !== "ready") return;
+    if (!rootRef.current) return;
 
-    if (!kakao?.maps || !map) return;
+    const relayout = () => {
+      try {
+        mapRef.current?.relayout();
+      } catch {}
+      try {
+        roadviewRef.current?.relayout();
+      } catch {}
+    };
 
-    if (isSelectingRoadview) {
-      map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-    } else {
-      map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-    }
-  }, [isSelectingRoadview, mapStatus, roadviewStatus]);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      if (activeTab === "map" && mapInstanceRef.current) {
-        mapInstanceRef.current.relayout();
-
-        if (selectedRoadviewPositionRef.current) {
-          mapInstanceRef.current.setCenter(selectedRoadviewPositionRef.current);
-        } else if (propertyPositionRef.current) {
-          mapInstanceRef.current.setCenter(propertyPositionRef.current);
-        }
-      }
-
-      if (activeTab === "roadview" && roadviewInstanceRef.current) {
-        roadviewInstanceRef.current.relayout();
-
-        if (panoIdRef.current && selectedRoadviewPositionRef.current) {
-          roadviewInstanceRef.current.setPanoId(
-            panoIdRef.current,
-            selectedRoadviewPositionRef.current
-          );
-        }
-      }
+    const observer = new ResizeObserver(() => {
+      setTimeout(relayout, 80);
     });
 
-    return () => window.cancelAnimationFrame(frame);
-  }, [activeTab]);
+    observer.observe(rootRef.current);
+    setTimeout(relayout, 80);
 
-  const fallbackQuery = encodeURIComponent(`${listing.region_name} ${listing.apt_name}`);
-  const fallbackUrl = `https://map.kakao.com/link/search/${fallbackQuery}`;
+    return () => observer.disconnect();
+  }, [status, viewMode]);
 
-  const handleSelectRoadviewFromMap = () => {
-    setActiveTab("map");
-    setIsSelectingRoadview(true);
-    setRoadviewStatus("idle");
-    setRoadviewMessage("지도에서 원하는 위치를 클릭해주세요.");
-    setMapMessage("지도에서 원하는 위치를 클릭하면 해당 지점의 로드뷰를 엽니다.");
-  };
+  // Marker drawing only when listing set changes
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (!window.kakao?.maps) return;
+    if (!mapRef.current) return;
 
-  const handleOpenPropertyRoadview = () => {
-    if (!propertyPositionRef.current) {
-      setRoadviewStatus("error");
-      setRoadviewMessage("매물 좌표를 아직 찾지 못했습니다.");
+    const map = mapRef.current;
+    const kakao = window.kakao;
+
+    markersRef.current.forEach((marker) => marker.setMap(null));
+    markersRef.current = [];
+    markerByIdRef.current = new Map();
+
+    coordsByIdRef.current = new Map();
+
+    if (!listings.length) {
+      setPointCount(0);
+      setSearchingCoords(false);
       return;
     }
 
-    openRoadviewAt(propertyPositionRef.current, {
-      switchTab: true,
-      selectionSource: "property",
+    let cancelled = false;
+
+    const bounds = new kakao.maps.LatLngBounds();
+    const places = kakao.maps.services ? new kakao.maps.services.Places() : null;
+    const cache = readCoordsCache();
+
+    let found = 0;
+    let completed = 0;
+    let pendingSearches = 0;
+
+    const maybeFitBounds = () => {
+      if (found > 0 && !selectedIdRef.current) {
+        try {
+          map.setBounds(bounds);
+          setTimeout(() => {
+            try {
+              map.relayout();
+            } catch {}
+          }, 80);
+        } catch {}
+      }
+    };
+
+    const finalize = () => {
+      if (cancelled) return;
+      completed += 1;
+      setSearchingCoords(pendingSearches > 0);
+
+      if (completed === listings.length) {
+        setPointCount(found);
+        setSearchingCoords(false);
+        maybeFitBounds();
+        updateMarkerSelection(markerByIdRef, selectedIdRef.current);
+      }
+    };
+
+    const paintMarker = (listing, coords) => {
+      const marker = new kakao.maps.Marker({
+        position: coords,
+        image: makeMarkerImage("#334155", 18),
+      });
+
+      marker.setMap(map);
+      markersRef.current.push(marker);
+      markerByIdRef.current.set(listing.id, marker);
+      coordsByIdRef.current.set(listing.id, coords);
+
+      kakao.maps.event.addListener(marker, "click", () => {
+        onSelectListing?.(listing.id);
+      });
+
+      bounds.extend(coords);
+      found += 1;
+    };
+
+    const searchByKeyword = (listing, keyword) =>
+      new Promise((resolve) => {
+        pendingSearches += 1;
+        setSearchingCoords(true);
+
+        places.keywordSearch(keyword, (result, searchStatus) => {
+          pendingSearches -= 1;
+          if (cancelled) {
+            resolve(null);
+            return;
+          }
+
+          if (searchStatus !== kakao.maps.services.Status.OK) {
+            resolve(null);
+            return;
+          }
+
+          const best = pickBestKeywordResult(result, getAptName(listing), getDongName(listing));
+          resolve(best);
+        });
+      });
+
+    const processListing = async (listing) => {
+      const lat = getLat(listing);
+      const lng = getLng(listing);
+
+      if (lat !== null && lng !== null) {
+        paintMarker(listing, new kakao.maps.LatLng(lat, lng));
+        finalize();
+        return;
+      }
+
+      const cacheKey = makeCoordsCacheKey(listing);
+      const cached = cache[cacheKey];
+      if (isValidCacheEntry(cached)) {
+        paintMarker(listing, new kakao.maps.LatLng(cached.lat, cached.lng));
+        finalize();
+        return;
+      }
+
+      if (!places) {
+        finalize();
+        return;
+      }
+
+      const keyword = `${getDongName(listing)} ${getAptName(listing)}`.trim();
+      if (!keyword) {
+        finalize();
+        return;
+      }
+
+      const best = await searchByKeyword(listing, keyword);
+      if (best && !cancelled) {
+        const coords = new kakao.maps.LatLng(best.y, best.x);
+        paintMarker(listing, coords);
+        cache[cacheKey] = {
+          lat: Number(best.y),
+          lng: Number(best.x),
+          version: COORDS_CACHE_VERSION,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
+          confidence: "keyword-scored",
+          placeName: best.place_name || "",
+        };
+        writeCoordsCache(cache);
+      }
+
+      finalize();
+    };
+
+    const queue = [...listings];
+    const workerCount = Math.min(MAX_CONCURRENT_PLACE_SEARCH, queue.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (!cancelled && queue.length > 0) {
+        const listing = queue.shift();
+        if (!listing) return;
+        await processListing(listing);
+      }
     });
-  };
 
-  const handleCancelSelection = () => {
-    setIsSelectingRoadview(false);
-    setMapMessage("");
-  };
+    Promise.all(workers).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [listings, status, onSelectListing]);
 
-  const wrapperClass = embedded
-    ? "bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm"
-    : "bg-white rounded-2xl overflow-hidden w-full max-w-5xl mx-4 shadow-xl";
+  useEffect(() => {
+    if (status !== "ready") return;
+    updateMarkerSelection(markerByIdRef, selectedId);
+  }, [selectedId, status]);
 
-  const rootClass = embedded
-    ? "w-full"
-    : "fixed inset-0 bg-black/50 flex items-center justify-center z-50";
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (!window.kakao?.maps) return;
+    if (!mapRef.current || !roadviewRef.current || !roadviewClientRef.current) return;
+
+    const map = mapRef.current;
+    const roadview = roadviewRef.current;
+    const roadviewClient = roadviewClientRef.current;
+    const kakao = window.kakao;
+
+    if (selectionOverlayRef.current) {
+      selectionOverlayRef.current.setMap(null);
+      selectionOverlayRef.current = null;
+    }
+    if (pulseOverlayRef.current) {
+      pulseOverlayRef.current.setMap(null);
+      pulseOverlayRef.current = null;
+    }
+
+    if (!resolvedSelectedListing) {
+      setRoadviewMessage("매물을 선택하면 스트리트뷰를 함께 보여드립니다.");
+      return;
+    }
+
+    const showSelection = (coords) => {
+      try {
+        map.panTo(coords);
+        setTimeout(() => {
+          try {
+            map.setLevel(2);
+          } catch {}
+        }, 180);
+
+        const overlay = new kakao.maps.CustomOverlay({
+          position: coords,
+          yAnchor: 1.8,
+          content: `
+            <div style="
+              background:#dc2626;
+              color:white;
+              padding:10px 12px;
+              border-radius:12px;
+              font-size:12px;
+              font-weight:800;
+              box-shadow:0 6px 18px rgba(0,0,0,0.22);
+              white-space:nowrap;
+              border:2px solid white;
+            ">
+              ${getAptName(resolvedSelectedListing) || "선택 매물"}
+            </div>
+          `,
+        });
+        overlay.setMap(map);
+        selectionOverlayRef.current = overlay;
+
+        const pulse = new kakao.maps.CustomOverlay({
+          position: coords,
+          yAnchor: 0.5,
+          content: `
+            <div style="
+              width:20px;
+              height:20px;
+              border-radius:9999px;
+              background:rgba(220,38,38,0.25);
+              box-shadow:0 0 0 0 rgba(220,38,38,0.35);
+              animation:pulse-marker 1.6s infinite;
+              border:2px solid rgba(220,38,38,0.5);
+            "></div>
+          `,
+        });
+        pulse.setMap(map);
+        pulseOverlayRef.current = pulse;
+      } catch {}
+
+      roadviewClient.getNearestPanoId(coords, 50, (panoId) => {
+        if (panoId) {
+          try {
+            roadview.setPanoId(panoId, coords);
+            setRoadviewMessage("");
+          } catch {
+            setRoadviewMessage("스트리트뷰를 표시하지 못했습니다.");
+          }
+          return;
+        }
+
+        roadviewClient.getNearestPanoId(coords, 200, (fallbackPanoId) => {
+          if (fallbackPanoId) {
+            try {
+              roadview.setPanoId(fallbackPanoId, coords);
+              setRoadviewMessage("가장 가까운 도로 기준 스트리트뷰를 보여드립니다.");
+            } catch {
+              setRoadviewMessage("스트리트뷰를 표시하지 못했습니다.");
+            }
+          } else {
+            setRoadviewMessage("선택한 매물 근처에 스트리트뷰가 없습니다. 지도로 위치를 확인해주세요.");
+          }
+        });
+      });
+    };
+
+    const savedCoords = coordsByIdRef.current.get(resolvedSelectedListing.id);
+    if (savedCoords) {
+      showSelection(savedCoords);
+      return;
+    }
+
+    const lat = getLat(resolvedSelectedListing);
+    const lng = getLng(resolvedSelectedListing);
+    if (lat !== null && lng !== null) {
+      showSelection(new kakao.maps.LatLng(lat, lng));
+      return;
+    }
+
+    if (!kakao.maps.services) return;
+
+    const cache = readCoordsCache();
+    const cacheKey = makeCoordsCacheKey(resolvedSelectedListing);
+    const cached = cache[cacheKey];
+    if (isValidCacheEntry(cached)) {
+      const coords = new kakao.maps.LatLng(cached.lat, cached.lng);
+      coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
+      showSelection(coords);
+      return;
+    }
+
+    const places = new kakao.maps.services.Places();
+    const keyword = `${getDongName(resolvedSelectedListing)} ${getAptName(resolvedSelectedListing)}`.trim();
+    if (!keyword) {
+      setRoadviewMessage("선택한 매물의 위치 키워드를 찾지 못했습니다.");
+      return;
+    }
+
+    setSearchingCoords(true);
+    places.keywordSearch(keyword, (result, searchStatus) => {
+      setSearchingCoords(false);
+      const best =
+        searchStatus === kakao.maps.services.Status.OK
+          ? pickBestKeywordResult(result, getAptName(resolvedSelectedListing), getDongName(resolvedSelectedListing))
+          : null;
+
+      if (best) {
+        const coords = new kakao.maps.LatLng(best.y, best.x);
+        coordsByIdRef.current.set(resolvedSelectedListing.id, coords);
+        cache[cacheKey] = {
+          lat: Number(best.y),
+          lng: Number(best.x),
+          version: COORDS_CACHE_VERSION,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + COORDS_CACHE_TTL_MS,
+          confidence: "keyword-scored",
+          placeName: best.place_name || "",
+        };
+        writeCoordsCache(cache);
+        showSelection(coords);
+      } else {
+        setRoadviewMessage("선택한 매물의 좌표를 찾지 못했습니다.");
+      }
+    });
+  }, [resolvedSelectedListing, status]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const styleId = "pulse-marker-style";
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.innerHTML = `
+      @keyframes pulse-marker {
+        0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(220,38,38,0.4); }
+        70% { transform: scale(1.35); box-shadow: 0 0 0 14px rgba(220,38,38,0); }
+        100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+
+  const showNoPointOverlay = status === "ready" && listings.length > 0 && pointCount === 0;
 
   return (
-    <div className={rootClass}>
-      <div className={wrapperClass}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <div>
-            <p className="font-semibold text-gray-900">{listing.apt_name}</p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {listing.region_name} · {listing.area_size}㎡ · {listing.floor}층
-            </p>
+    <div ref={rootRef} className="w-full h-full min-h-[520px] relative bg-slate-100 overflow-hidden">
+      {status === "loading" && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-20">
+          <span className="text-slate-400 font-bold tracking-widest uppercase animate-pulse text-sm">
+            지도 엔진 초기화 중...
+          </span>
+        </div>
+      )}
+
+      {status === "error" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 z-20 px-6 text-center">
+          <p className="text-red-500 font-semibold mb-2">지도를 불러오지 못했습니다.</p>
+          <p className="text-sm text-slate-500 whitespace-pre-wrap">{error}</p>
+        </div>
+      )}
+
+      {searchingCoords && (
+        <div className="absolute left-6 bottom-6 z-30 pointer-events-none">
+          <div className="bg-white/90 border border-slate-200 rounded-xl px-4 py-2 shadow-md text-xs font-bold text-slate-600">
+            매물 좌표를 찾는 중...
+          </div>
+        </div>
+      )}
+
+      {resolvedSelectedListing && status === "ready" && (
+        <div className="absolute top-6 left-6 z-30 bg-white/92 backdrop-blur border border-slate-200 rounded-2xl shadow-xl px-4 py-3 min-w-[260px] max-w-[320px]">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">선택 매물</div>
+          <div className="text-sm font-black text-slate-900 break-keep">{getAptName(resolvedSelectedListing) || "이름 없음"}</div>
+          <div className="text-xs text-slate-500 font-semibold mt-1 break-keep">
+            {getDongName(resolvedSelectedListing) || "지역 정보 없음"}
           </div>
 
-          {!embedded && (
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-xl font-light"
-            >
-              ✕
-            </button>
+          <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">매매가</div>
+              <div className="text-slate-900 font-black mt-1">{formatPriceText(resolvedSelectedListing?.price)}</div>
+            </div>
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">절감액</div>
+              <div className="text-red-600 font-black mt-1">{formatPriceText(getDiscountAmount(resolvedSelectedListing))}</div>
+            </div>
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">면적</div>
+              <div className="text-slate-900 font-black mt-1">{resolvedSelectedListing?.area_size || "-"}㎡</div>
+            </div>
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <div className="text-slate-400 font-bold">층수</div>
+              <div className="text-slate-900 font-black mt-1">{resolvedSelectedListing?.floor || "-"}층</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="absolute top-6 right-6 z-30 bg-white rounded-lg shadow-[0_4px_20px_rgba(0,0,0,0.1)] p-1 flex border border-slate-200 gap-1">
+        <button
+          onClick={() => setViewMode("map")}
+          className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
+            viewMode === "map" ? "bg-gray-900 text-white shadow-sm" : "text-gray-400 hover:text-gray-900"
+          }`}
+        >
+          지도
+        </button>
+        <button
+          onClick={() => setViewMode("split")}
+          className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
+            viewMode === "split" ? "bg-red-600 text-white shadow-sm" : "text-gray-400 hover:text-red-600"
+          }`}
+        >
+          분할
+        </button>
+        <button
+          onClick={() => setViewMode("roadview")}
+          className={`px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-md transition-all ${
+            viewMode === "roadview" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-blue-600"
+          }`}
+        >
+          스트리트뷰
+        </button>
+      </div>
+
+      <div className="absolute inset-0">
+        <div
+          className={`absolute inset-0 transition-all duration-300 ${
+            viewMode === "map" ? "w-full h-full opacity-100" : viewMode === "split" ? "w-1/2 h-full left-0 opacity-100" : "w-0 h-0 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div ref={mapPaneRef} className="w-full h-full" />
+          {showNoPointOverlay && viewMode !== "roadview" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 px-6 text-center pointer-events-none">
+              <p className="text-sm font-semibold text-slate-500 bg-white/80 px-4 py-2 rounded-lg">
+                지도에 표시할 좌표를 찾지 못했습니다.
+              </p>
+            </div>
           )}
         </div>
 
-        <div className="px-5 pt-4 flex flex-col gap-3">
-          <div className="inline-flex bg-gray-100 rounded-xl p-1 w-fit">
-            <button
-              onClick={() => setActiveTab("map")}
-              className={`px-4 py-2 text-sm rounded-lg transition ${
-                activeTab === "map"
-                  ? "bg-white text-gray-900 shadow-sm font-semibold"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              지도
-            </button>
-            <button
-              onClick={() => setActiveTab("roadview")}
-              className={`px-4 py-2 text-sm rounded-lg transition ${
-                activeTab === "roadview"
-                  ? "bg-white text-gray-900 shadow-sm font-semibold"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              로드뷰
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={handleOpenPropertyRoadview}
-              className="px-4 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-sm font-semibold transition"
-            >
-              매물 위치 로드뷰
-            </button>
-
-            {!isSelectingRoadview ? (
-              <button
-                onClick={handleSelectRoadviewFromMap}
-                className="px-4 py-2 rounded-xl bg-gray-900 hover:bg-black text-white text-sm font-semibold transition"
-              >
-                지도에서 로드뷰 선택
-              </button>
-            ) : (
-              <button
-                onClick={handleCancelSelection}
-                className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm font-semibold transition"
-              >
-                선택 취소
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="p-5">
-          <div
-            ref={mapRef}
-            className={`${activeTab === "map" ? "block" : "hidden"} w-full ${contentHeightClass} rounded-xl border border-gray-200 bg-gray-50`}
-          />
-
-          <div className={`${activeTab === "roadview" ? "block" : "hidden"} w-full`}>
-            <div
-              ref={roadviewRef}
-              className={`w-full ${contentHeightClass} rounded-xl border border-gray-200 ${
-                roadviewStatus === "ready" ? "bg-gray-50" : "bg-gray-100"
-              }`}
-            />
-
-            {roadviewStatus !== "ready" && (
-              <div className="mt-4 text-sm text-gray-500">{roadviewMessage}</div>
-            )}
-
-            {(roadviewStatus === "empty" || roadviewStatus === "error") && (
-              <div className="mt-4">
-                <a
-                  href={fallbackUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-semibold text-sm px-5 py-3 rounded-xl transition"
-                >
-                  카카오 지도에서 직접 열기
-                </a>
-              </div>
-            )}
-          </div>
-
-          {activeTab === "map" && mapMessage && (
-            <div className="mt-4 text-sm text-gray-500">{mapMessage}</div>
+        <div
+          className={`absolute inset-y-0 right-0 transition-all duration-300 ${
+            viewMode === "roadview" ? "w-full h-full opacity-100" : viewMode === "split" ? "w-1/2 h-full opacity-100" : "w-0 h-0 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div ref={roadPaneRef} className="w-full h-full" />
+          {roadviewMessage && (viewMode === "roadview" || viewMode === "split") && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <p className="text-sm font-semibold text-slate-500 bg-white/85 px-4 py-2 rounded-lg text-center mx-6">
+                {roadviewMessage}
+              </p>
+            </div>
           )}
         </div>
       </div>

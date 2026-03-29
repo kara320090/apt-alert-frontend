@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Apt Alert Frontend
 
-## Getting Started
+급매물 알리미 프론트엔드입니다. Next.js 기반이며, FastAPI 백엔드와 연결되는 구조로 정리되어 있습니다.
 
-First, run the development server:
+## 실행 방법
 
 ```bash
+npm install
+cp .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+브라우저에서 `http://localhost:3000` 으로 접속합니다.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## 필요한 환경변수
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `NEXT_PUBLIC_API_URL` : FastAPI 백엔드 주소
+- `API_URL` : (선택) Next API Route에서 사용할 서버 전용 백엔드 주소
+- `NEXT_PUBLIC_KAKAO_MAP_KEY` : 카카오맵 JavaScript 키
+- `KAKAO_REST_API_KEY` : AI 입지 태그용 카카오 로컬 REST 키
 
-## Learn More
+## 현재 기능
 
-To learn more about Next.js, take a look at the following resources:
+- 지역 / 등급 / 할인율 필터
+- 급매 목록 조회
+- 카카오맵 패널 표시
+- AI 입지 태그
+- 지역 리포트
+- 구독 조건 저장
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 비고
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `.env.local` 은 ZIP에 포함하지 않았습니다.
+- `node_modules`, `.next`, `.git` 도 제외했습니다.

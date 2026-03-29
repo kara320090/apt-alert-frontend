@@ -1,52 +1,44 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { regions as fallbackRegions, grades } from "../data/dummy";
+import { useEffect, useState } from "react";
+import { grades as fallbackGrades } from "../data/dummy";
 
-const AI_STORAGE_KEY = "apt-alert-ai-enabled";
-
-function readStoredAiEnabled() {
-  if (typeof window === "undefined") return false;
-  try {
-    return localStorage.getItem(AI_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-export default function FilterBar({ onFilter, initialValue, regions }) {
-  const regionOptions = useMemo(() => {
-    const source = Array.isArray(regions) && regions.length > 0 ? regions : fallbackRegions;
-    return source;
-  }, [regions]);
-
-  const [region, setRegion] = useState(initialValue?.region || "전체");
-  const [grade, setGrade] = useState(initialValue?.grade || "전체");
+export default function FilterBar({
+  onFilter,
+  regions = ["전체"],
+  initialValue = {
+    region: "전체",
+    grade: "전체",
+    minDiscount: 5,
+    aiEnabled: false,
+    perPage: 20,
+  },
+}) {
+  const [region, setRegion] = useState(initialValue.region || "전체");
+  const [grade, setGrade] = useState(initialValue.grade || "전체");
   const [minDiscount, setMinDiscount] = useState(
-    Number(initialValue?.minDiscount ?? initialValue?.maxDiscount ?? 5)
+    typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 5
   );
-  const [aiEnabled, setAiEnabled] = useState(() => {
-    if (typeof initialValue?.aiEnabled === "boolean") {
-      return initialValue.aiEnabled;
-    }
-    return readStoredAiEnabled();
-  });
-
+  const [aiEnabled, setAiEnabled] = useState(Boolean(initialValue.aiEnabled));
+  const [perPage, setPerPage] = useState(
+    typeof initialValue.perPage === "number" ? initialValue.perPage : 20
+  );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      localStorage.setItem(AI_STORAGE_KEY, String(aiEnabled));
-    } catch {}
-  }, [aiEnabled]);
+    setRegion(initialValue.region || "전체");
+    setGrade(initialValue.grade || "전체");
+    setMinDiscount(typeof initialValue.minDiscount === "number" ? initialValue.minDiscount : 5);
+    setAiEnabled(Boolean(initialValue.aiEnabled));
+    setPerPage(typeof initialValue.perPage === "number" ? initialValue.perPage : 20);
+  }, [initialValue]);
 
   function handleApply() {
-    onFilter?.({
+    onFilter({
       region,
       grade,
       minDiscount,
-      maxDiscount: minDiscount,
       aiEnabled,
+      perPage,
     });
   }
 
@@ -90,7 +82,7 @@ export default function FilterBar({ onFilter, initialValue, regions }) {
         <span className="text-xs text-gray-400">
           {aiEnabled
             ? "가격 + 역세권/학교/병원/생활편의 태그를 표시합니다"
-            : "가격 기반 요약만 표시합니다"}
+            : "기본 필터만 사용합니다"}
         </span>
       </div>
 
@@ -102,7 +94,7 @@ export default function FilterBar({ onFilter, initialValue, regions }) {
             value={region}
             onChange={(e) => setRegion(e.target.value)}
           >
-            {regionOptions.map((r) => (
+            {regions.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
@@ -117,7 +109,7 @@ export default function FilterBar({ onFilter, initialValue, regions }) {
             value={grade}
             onChange={(e) => setGrade(e.target.value)}
           >
-            {grades.map((g) => (
+            {fallbackGrades.map((g) => (
               <option key={g} value={g}>
                 {g}
               </option>
@@ -145,6 +137,21 @@ export default function FilterBar({ onFilter, initialValue, regions }) {
             <span>40%</span>
           </div>
         </div>
+      </div>
+
+      <div className="mb-5">
+        <label className="block text-xs font-medium text-gray-500 mb-1.5">페이지당 매물 수</label>
+        <select
+          className="w-full md:w-56 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          value={perPage}
+          onChange={(e) => setPerPage(Number(e.target.value))}
+        >
+          {[20, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n}개
+            </option>
+          ))}
+        </select>
       </div>
 
       <button

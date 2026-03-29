@@ -1,159 +1,142 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import KakaoMap from "./KakaoMap";
-
-function getMarketAvgCaption(listing) {
-  const count = Number(listing.market_avg_count || 0);
-  const months = Number(listing.market_avg_period_months || 12);
-  const method = String(listing.market_avg_method || "");
-
-  if (count <= 0) return null;
-  if (method === "same_apartment_last_12_months") {
-    return `같은 아파트 최근 ${months}개월 ${count}건 평균`;
-  }
-  return `비교 시세 기준 ${count}건`;
-}
-
-export default function ListingCard({
-  listing,
-  aiEnabled = false,
-  mapMode = "modal",
-  onOpenMap,
-  isSelected = false,
-}) {
-  const [open, setOpen] = useState(false);
-  const [showMap, setShowMap] = useState(false);
-
-  const gradeStyle = {
-    초급매: { bg: "bg-red-50", text: "text-red-600", border: "border-red-200" },
-    급매: { bg: "bg-orange-50", text: "text-orange-500", border: "border-orange-200" },
-    저평가: { bg: "bg-emerald-50", text: "text-emerald-600", border: "border-emerald-200" },
-    일반: { bg: "bg-gray-50", text: "text-gray-400", border: "border-gray-200" },
-  };
-
-  const style = gradeStyle[listing.grade] || gradeStyle["일반"];
-  const marketAvgCaption = useMemo(() => getMarketAvgCaption(listing), [listing]);
+export default function ListingCard({ listing, isSelected }) {
+  const isSuper = listing.grade === "초급매";
 
   function formatPrice(price) {
     const uk = Math.floor(Number(price || 0) / 10000);
     const man = Number(price || 0) % 10000;
-
     if (uk > 0 && man > 0) return `${uk}억 ${man.toLocaleString()}만`;
     if (uk > 0) return `${uk}억`;
     return `${Number(price || 0).toLocaleString()}만`;
   }
 
+  function formatPercent(value) {
+    const safe = Math.max(0, Math.round(Number(value || 0) * 10) / 10);
+    if (safe === 0) return "0%";
+    return Number.isInteger(safe) ? `${safe}%` : `${safe.toFixed(1)}%`;
+  }
+
+  const discountAmount = Math.max(0, Number(listing.market_avg || 0) - Number(listing.price || 0));
+  const discountRate = Number.isFinite(Number(listing.discount_rate))
+    ? Math.max(0, Number(listing.discount_rate))
+    : 0;
+  const tags = Array.isArray(listing.ai_tags) ? listing.ai_tags : [];
+  const risk = listing.risk || null;
+  const riskSignals = Array.isArray(risk?.signals) ? risk.signals : [];
+  const trend = listing.price_trend || null;
+
+  const riskColors = {
+    위험: "bg-red-50 text-red-600 border-red-200",
+    주의: "bg-yellow-50 text-yellow-600 border-yellow-200",
+  };
+  const trendColors = {
+    상승: "text-red-500",
+    하락: "text-blue-500",
+    보합: "text-slate-400",
+  };
+  const trendArrows = { 상승: "↑", 하락: "↓", 보합: "→" };
+
   return (
-    <>
-      <div
-        className={`bg-white rounded-2xl border ${style.border} shadow-sm mb-3 overflow-hidden transition-all ${
-          isSelected ? "ring-2 ring-blue-200" : ""
-        }`}
-      >
-        <div
-          className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-50 transition"
-          onClick={() => {
-            setOpen(!open);
-            if (mapMode === "panel" && onOpenMap) {
-              onOpenMap(listing);
-            }
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${style.bg} ${style.text}`}>
+    <div className={`relative bg-white rounded-2xl border p-6 transition-all duration-300 group mb-4 cursor-pointer ${
+      isSelected
+        ? "border-red-500 shadow-[0_8px_30px_-4px_rgba(220,38,38,0.15)] ring-2 ring-red-500/10"
+        : "border-slate-200/80 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] hover:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] hover:-translate-y-1 hover:border-slate-300"
+    }`}>
+      
+      {/* 1. Header: Asset & Urgency */}
+      <div className="flex justify-between items-start mb-4">
+        <div className="flex flex-col gap-1.5 w-2/3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-[10px] font-black px-2.5 py-1 rounded tracking-widest text-white shadow-sm ${isSuper ? "bg-red-600" : "bg-orange-500"}`}>
               {listing.grade}
             </span>
-            <span className="text-sm font-semibold text-gray-900">{listing.apt_name}</span>
-            <span className="text-xs text-gray-400 hidden md:inline">
-              {listing.region_name} · {listing.area_size}㎡
+            {risk && risk.level !== "낮음" && (
+              <span className={`text-[10px] font-black px-2 py-1 rounded border ${riskColors[risk.level]}`}>
+                ⚠ {risk.level}
+              </span>
+            )}
+            <span className="text-xs font-bold text-gray-400">
+              시세 대비 <span className={isSuper ? "text-red-600" : "text-orange-500"}>{formatPrice(discountAmount)}</span> 저렴
             </span>
           </div>
-
-          <div className="flex items-center gap-3">
-            <span className={`text-sm font-bold ${style.text}`}>−{listing.discount_rate}%</span>
-            <span className="text-sm font-semibold text-gray-800">{formatPrice(listing.price)}</span>
-            <span className="text-gray-300 text-sm">{open ? "▲" : "▼"}</span>
-          </div>
+          <h3 className="text-lg font-black text-gray-900 tracking-tight mt-1 group-hover:text-red-600 transition-colors truncate">
+            {listing.apt_name || "단지명 미상"}
+          </h3>
+          <p className="text-xs font-medium text-gray-500 truncate">
+            {listing.region_name} · {listing.area_size}㎡
+          </p>
         </div>
 
-        {listing.ai_summary && (
-          <div className="px-5 pb-4 -mt-1">
-            <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
-              <p className="text-[11px] font-semibold text-blue-700 mb-1">
-                {aiEnabled ? "AI 해석" : "가격 해석"}
-              </p>
-              <p className="text-sm text-blue-900">{listing.ai_summary}</p>
-
-              {Array.isArray(listing.ai_tags) && listing.ai_tags.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {listing.ai_tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="text-[11px] px-2.5 py-1 rounded-full bg-white border border-blue-200 text-blue-700"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {open && (
-          <div className="px-5 pb-5 border-t border-gray-100">
-            <div className="grid grid-cols-2 gap-4 mt-4">
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-xs text-gray-400 mb-1">실거래가</p>
-                <p className="text-lg font-bold text-gray-900">{formatPrice(listing.price)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-xs text-gray-400 mb-1">시세 평균</p>
-                <p className="text-lg font-bold text-gray-500">{formatPrice(listing.market_avg)}</p>
-                {marketAvgCaption && (
-                  <p className="text-[11px] text-gray-400 mt-1">{marketAvgCaption}</p>
-                )}
-              </div>
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-xs text-gray-400 mb-1">할인율</p>
-                <p className={`text-lg font-bold ${style.text}`}>−{listing.discount_rate}%</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-xs text-gray-400 mb-1">위치</p>
-                <p className="text-sm font-semibold text-gray-700">
-                  {listing.region_name} · {listing.floor}층
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center mt-4">
-              <p className="text-xs text-gray-300">
-                {listing.deal_year}년 {listing.deal_month}월 거래
-              </p>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onOpenMap) {
-                    onOpenMap(listing);
-                  }
-
-                  if (mapMode === "modal") {
-                    setShowMap(true);
-                  }
-                }}
-                className="text-xs text-blue-500 hover:text-blue-700 font-medium transition"
-              >
-                {mapMode === "panel" ? "우측 지도에서 보기 →" : "지도에서 보기 →"}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Scaled down discount percentage */}
+        <div className="text-right flex flex-col items-end w-1/3">
+           <p className={`text-3xl font-black tracking-tighter ${isSuper ? "text-red-600" : "text-orange-500"}`}>
+            {discountRate > 0 ? `-${formatPercent(discountRate)}` : formatPercent(discountRate)}
+          </p>
+        </div>
       </div>
 
-      {mapMode === "modal" && showMap && (
-        <KakaoMap listing={listing} onClose={() => setShowMap(false)} />
+      {/* 2. Price Anchor */}
+      <div className="flex justify-end items-end pb-4 mb-4 border-b border-gray-100">
+        <div className="text-right">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">최종 급매가</p>
+          {/* Scaled down final price */}
+          <p className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">
+            {formatPrice(listing.price)}
+          </p>
+        </div>
+      </div>
+
+      {/* 3. Price Trend */}
+      {trend && (
+        <div className="flex items-center justify-between mb-4 px-1">
+          <span className={`text-xs font-black ${trendColors[trend.direction]}`}>
+            {trendArrows[trend.direction]} 시세 {trend.direction} ({formatPercent(Math.abs(trend.trend_rate))}/월)
+          </span>
+          <span className="text-[11px] text-slate-400">
+            3개월 후 예상 <span className="font-bold text-slate-600">{formatPrice(trend.forecast_3m)}</span>
+          </span>
+        </div>
       )}
-    </>
+
+      {/* 4. AI Intel Box — 태그 또는 요약이 있을 때만 표시 */}
+      {(tags.length > 0 || listing.ai_summary) && (
+        <div className="bg-[#f8faff] rounded-xl p-4 border border-blue-50/50">
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="text-[11px] font-black text-blue-600 uppercase tracking-wider">AI 해석</span>
+          </div>
+          {listing.ai_summary && (
+            <p className="text-[13px] font-medium text-slate-700 leading-relaxed mb-3">
+              {listing.ai_summary}
+            </p>
+          )}
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {tags.map((tag, idx) => (
+                <span key={idx} className="text-[11px] font-bold text-blue-600 bg-white border border-blue-100 px-2.5 py-1 rounded-md shadow-sm">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. Risk Signals (주의/위험만 표시) */}
+      {risk && risk.level !== "낮음" && riskSignals.length > 0 && (
+        <div className={`mt-3 rounded-xl px-3 py-2 border ${risk.level === "위험" ? "bg-red-50 border-red-100" : "bg-yellow-50 border-yellow-100"}`}>
+          <p className={`text-[10px] font-black uppercase tracking-[0.14em] mb-1.5 ${risk.level === "위험" ? "text-red-600" : "text-yellow-600"}`}>
+            ⚠ 위험 신호 (패턴 기반 경고)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {riskSignals.map((signal) => (
+              <span key={signal} className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${risk.level === "위험" ? "bg-white text-red-600 border-red-200" : "bg-white text-yellow-600 border-yellow-200"}`}>
+                {signal}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
