@@ -1,42 +1,22 @@
-# 프론트 실행 방법
+# Backend 연결 안내
 
-## 1. 환경변수
-프로젝트 루트에서 `.env.example`을 복사해 `.env.local`로 만든 뒤 값을 채웁니다.
+현재 Frontend는 매물 조회 서버와 이메일 구독 서버를 별도로 사용합니다. 전체 실행 방법은 [README](README.md)를 참고하세요.
 
-```bash
-cp .env.example .env.local
-```
+| 환경변수 | 대상 | 호출 경로 |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | 매물 조회 Backend | `/regions`, `/listings`, `/filter` |
+| `EMAIL_API_BASE_URL` | 이메일 Backend | `/subscribe`, `/unsubscribe` |
 
-예시:
+브라우저의 `/api/subscribe`와 `/api/unsubscribe` 요청은 Next.js API Route를 거쳐 이메일 Backend로 전달됩니다. 현재 코드는 `EMAIL_API_BASE_URL`이 없으면 오류를 반환하며 `API_URL`로 자동 대체하지 않습니다.
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
-API_URL=http://localhost:8000
+EMAIL_API_BASE_URL=http://localhost:8001
 NEXT_PUBLIC_KAKAO_MAP_KEY=your_kakao_javascript_key
 KAKAO_REST_API_KEY=your_kakao_rest_api_key
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.0-flash
 ```
 
-## 2. 백엔드와 연결되는 엔드포인트
-이 프론트는 아래 백엔드와 맞물리도록 수정되어 있습니다.
+포트는 로컬 구성 예시입니다. 이메일 API는 [backend_email](https://github.com/kara320090/backend_email)의 설정과 맞춥니다.
 
-- `GET /regions`
-- `GET /filter`
-- `POST /subscribe`
-- `GET /health`
-
-## 3. 실행
-
-```bash
-npm install
-npm run dev
-```
-
-## 4. 주의
-- 구독 저장은 프론트에서 `/api/subscribe`로 호출하고, `app/api/subscribe/route.js`가 백엔드 `/subscribe`로 전달합니다.
-- `app/api/subscribe/route.js`는 `API_URL`을 우선 사용하고, 없으면 `NEXT_PUBLIC_API_URL`을 사용합니다.
-- 급매 목록 조회는 `/filter`를 사용합니다.
-- 지역 목록은 `/regions`를 사용합니다.
-- AI 입지 태그는 `app/api/ai/listing-tags/route.js`와 `KAKAO_REST_API_KEY`가 필요합니다.
-- AI 지역 요약 Gemini 연동은 `app/api/ai/region-summary/route.js`와 `GEMINI_API_KEY`가 필요합니다.
+근거 코드: [매물 API](lib/api.js), [구독 프록시](app/api/subscribe/route.js), [해제 프록시](app/api/unsubscribe/route.js).
